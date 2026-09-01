@@ -28,7 +28,7 @@ import sys
 USERNAME = "hmmanya"
 
 # The folder containing manage.py. Change this if the check below complains.
-PROJECT_DIR = f"/home/{USERNAME}/hair-saloon"
+PROJECT_DIR = f"/home/hmmanya/hair-saloon"
 
 # Fall back to the nested layout automatically if that is where manage.py lives.
 if not os.path.exists(os.path.join(PROJECT_DIR, "manage.py")):
