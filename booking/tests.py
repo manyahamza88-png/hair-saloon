@@ -1234,3 +1234,115 @@ class PerCalendarOAuthTests(BaseSalonTest):
         push.assert_called()
         appointment.refresh_from_db()
         self.assertEqual(appointment.google_event_id, "evt-9")
+
+
+class GoogleRSVPTests(BaseSalonTest):
+    """Accepting a booking by answering "Going?" in Google Calendar."""
+
+    def setUp(self):
+        super().setUp()
+        self.credential = GoogleCredential.objects.create(
+            name="Salon", auth_type=GoogleCredential.OAUTH,
+            oauth_account_email="salon@gmail.com",
+            oauth_scopes='["https://www.googleapis.com/auth/calendar"]',
+        )
+        self.credential.set_refresh_token("r")
+        self.credential.save()
+        self.calendar.credential = self.credential
+        self.calendar.owner_email = "maria@example.com"
+        self.calendar.save()
+
+    def event_with(self, response, start=None, end=None):
+        appointment = getattr(self, "appointment", None)
+        return {
+            "start": {"dateTime": (start or appointment.start_at).isoformat()},
+            "end": {"dateTime": (end or appointment.end_at).isoformat()},
+            "attendees": [
+                {"email": "maria@example.com", "responseStatus": response},
+                {"email": "ana@example.com", "responseStatus": "needsAction"},
+            ],
+        }
+
+    def book(self, initial_rsvp="needsAction"):
+        created = {
+            "id": "evt-1",
+            "attendees": [{"email": "maria@example.com", "responseStatus": initial_rsvp}],
+        }
+        service = mock.Mock()
+        service.events.return_value.insert.return_value.execute.return_value = created
+        with mock.patch("booking.google_calendar.build_service", return_value=service):
+            self.appointment = self.make_appointment()
+        self.appointment.refresh_from_db()
+        return self.appointment
+
+    def test_the_stylist_is_invited_so_google_shows_going(self):
+        from booking.google_calendar import _event_body
+
+        self.appointment = self.make_appointment()
+        body = _event_body(self.appointment, self.salon, allow_attendees=True)
+        emails = [a["email"] for a in body["attendees"]]
+        self.assertIn("maria@example.com", emails)  # the stylist gets the RSVP prompt
+        self.assertIn("ana@example.com", emails)    # the customer still gets the invite
+        self.assertIn('Answer "Going?"', body["description"])
+
+    def test_initial_rsvp_is_recorded_at_creation(self):
+        appointment = self.book(initial_rsvp="needsAction")
+        self.assertEqual(appointment.google_event_id, "evt-1")
+        self.assertEqual(appointment.google_rsvp, "needsAction")
+
+    def test_saying_yes_in_google_confirms_the_booking(self):
+        from booking.services import reconcile_with_google
+
+        appointment = self.book()
+        mail.outbox.clear()
+        with mock.patch(
+            "booking.google_calendar.fetch_event", return_value=self.event_with("accepted")
+        ), mock.patch("booking.google_calendar.push_appointment", return_value="evt-1"):
+            change = reconcile_with_google(appointment)
+
+        self.assertEqual(change, "accepted")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.CONFIRMED)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("confirmed", mail.outbox[0].subject)
+
+    def test_saying_no_in_google_declines_and_frees_the_slot(self):
+        from booking.services import reconcile_with_google
+
+        appointment = self.book()
+        with mock.patch(
+            "booking.google_calendar.fetch_event", return_value=self.event_with("declined")
+        ), mock.patch("booking.google_calendar.delete_appointment_event"):
+            change = reconcile_with_google(appointment)
+
+        self.assertEqual(change, "declined")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.DECLINED)
+        labels = [s.label for s in availability.day_slots(self.calendar, next_weekday(0))]
+        self.assertIn("10:00", labels)
+
+    def test_an_unchanged_rsvp_decides_nothing(self):
+        from booking.services import reconcile_with_google
+
+        appointment = self.book()
+        with mock.patch(
+            "booking.google_calendar.fetch_event", return_value=self.event_with("needsAction")
+        ):
+            change = reconcile_with_google(appointment)
+        self.assertEqual(change, "none")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.PENDING)
+
+    def test_google_auto_accepting_the_organiser_is_not_a_decision(self):
+        """Google marks the organiser 'accepted' at once; that must not confirm."""
+        from booking.services import reconcile_with_google
+
+        appointment = self.book(initial_rsvp="accepted")   # stylist owns the calendar
+        with mock.patch(
+            "booking.google_calendar.fetch_event", return_value=self.event_with("accepted")
+        ):
+            change = reconcile_with_google(appointment)
+
+        self.assertEqual(change, "none")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.PENDING)  # links still decide it

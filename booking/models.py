@@ -615,6 +615,10 @@ class Appointment(models.Model):
     decided_at = models.DateTimeField(null=True, blank=True)
 
     google_event_id = models.CharField(max_length=255, blank=True, editable=False)
+    # The stylist's RSVP on the Google event, as Google last reported it.
+    # Recorded at creation so a later change can be read as a real decision:
+    # Google marks the organiser "accepted" straight away, which is not one.
+    google_rsvp = models.CharField(max_length=20, blank=True, editable=False)
     google_synced_at = models.DateTimeField(null=True, blank=True, editable=False)
     google_sync_error = models.TextField(blank=True, editable=False)
 

@@ -444,7 +444,10 @@ def _event_body(appointment, salon, allow_attendees: bool = False) -> dict:
     lines = []
     if appointment.status == Appointment.PENDING:
         lines += [
-            "*** NOT CONFIRMED YET — tap a link below ***",
+            "*** NOT CONFIRMED YET ***",
+            "",
+            'Answer "Going?" on this event: Yes accepts the booking, No declines it.',
+            "Or use a link below if you do not see that question.",
             "",
             f"ACCEPT:  {tokens.decision_url(appointment, tokens.ACCEPT)}",
             f"DECLINE: {tokens.decision_url(appointment, tokens.DECLINE)}",
@@ -478,11 +481,41 @@ def _event_body(appointment, salon, allow_attendees: bool = False) -> dict:
         "extendedProperties": {"private": {"salonAppointmentId": str(appointment.public_id)}},
         "reminders": {"useDefault": True},
     }
-    if allow_attendees and appointment.customer_email:
-        body["attendees"] = [
-            {"email": appointment.customer_email, "displayName": appointment.customer_name}
-        ]
+    if allow_attendees:
+        attendees = []
+        # The stylist is invited to their own booking on purpose: Google then
+        # shows "Going? Yes / No" on the event, in the mobile app included, and
+        # their answer is read back as accepting or declining the request.
+        if appointment.calendar.owner_email:
+            attendees.append(
+                {
+                    "email": appointment.calendar.owner_email,
+                    "displayName": appointment.calendar.name,
+                    "responseStatus": "needsAction",
+                }
+            )
+        if appointment.customer_email:
+            attendees.append(
+                {"email": appointment.customer_email, "displayName": appointment.customer_name}
+            )
+        if attendees:
+            body["attendees"] = attendees
     return body
+
+
+def owner_rsvp(event: dict, owner_email: str) -> str:
+    """The stylist's response on a Google event ("" when they are not an attendee).
+
+    Google reports the organiser as ``accepted`` immediately, so the caller must
+    compare against the value recorded when the event was created rather than
+    treating ``accepted`` as a decision on its own.
+    """
+    if not owner_email:
+        return ""
+    for attendee in event.get("attendees", []) or []:
+        if (attendee.get("email") or "").lower() == owner_email.lower():
+            return attendee.get("responseStatus", "")
+    return ""
 
 
 def appointment_url(appointment) -> str:
@@ -536,6 +569,9 @@ def push_appointment(appointment, notify_attendees: bool = False) -> str:
             event = _write(_event_body(appointment, salon, allow_attendees=False), "none")
         else:
             raise _wrap(exc) from exc
+
+    # Remember how Google recorded the stylist's response at creation time.
+    appointment.google_rsvp = owner_rsvp(event, calendar.owner_email)
     return event.get("id", "")
 
 
@@ -612,6 +648,14 @@ def read_back(appointment) -> dict:
     if event is None:
         return {"change": "deleted"}
 
+    # Did the stylist answer "Going?" in Google Calendar?
+    rsvp = owner_rsvp(event, calendar.owner_email)
+    if rsvp and rsvp != appointment.google_rsvp:
+        if rsvp == "accepted":
+            return {"change": "accepted", "rsvp": rsvp}
+        if rsvp == "declined":
+            return {"change": "declined", "rsvp": rsvp}
+
     start_raw = event.get("start", {}).get("dateTime")
     end_raw = event.get("end", {}).get("dateTime")
     if not (start_raw and end_raw):
@@ -653,5 +697,13 @@ def sync_appointment(appointment, notify_attendees: bool = False) -> bool:
 
     appointment.google_sync_error = ""
     appointment.google_synced_at = timezone.now()
-    appointment.save(update_fields=["google_event_id", "google_synced_at", "google_sync_error", "updated_at"])
+    appointment.save(
+        update_fields=[
+            "google_event_id",
+            "google_rsvp",
+            "google_synced_at",
+            "google_sync_error",
+            "updated_at",
+        ]
+    )
     return True

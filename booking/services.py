@@ -138,6 +138,21 @@ def reconcile_with_google(appointment, notify: bool = True) -> str:
             "Appointment %s moved in Google: %s -> %s", appointment.pk, old_start, result["start"]
         )
 
+    elif change == "accepted":
+        # The stylist tapped "Yes" on the event in Google Calendar.
+        appointment.google_rsvp = result["rsvp"]
+        appointment.save(update_fields=["google_rsvp", "updated_at"])
+        if appointment.status == Appointment.PENDING:
+            confirm_appointment(appointment, notify=notify)
+            logger.info("Appointment %s confirmed from a Google RSVP.", appointment.pk)
+
+    elif change == "declined":
+        appointment.google_rsvp = result["rsvp"]
+        appointment.save(update_fields=["google_rsvp", "updated_at"])
+        if appointment.status in (Appointment.PENDING, Appointment.CONFIRMED):
+            decline_appointment(appointment, notify=notify)
+            logger.info("Appointment %s declined from a Google RSVP.", appointment.pk)
+
     elif change == "error":
         appointment.google_sync_error = result["reason"][:2000]
         appointment.save(update_fields=["google_sync_error", "updated_at"])

@@ -3,9 +3,14 @@
 Staff work from Google Calendar on their phones, so that is where an
 appointment actually gets moved or deleted. This pulls those edits back:
 
+* stylist answers "Going?" -> Yes confirms the booking, No declines it, and the
+                              customer is emailed either way
 * event deleted in Google  -> the booking is cancelled and the customer told,
                               so the slot is not blocked by a ghost
 * event moved in Google    -> the booking's time follows it
+
+Run it often enough that a customer is not left waiting: every 10-20 minutes is
+a reasonable cadence where the host allows it.
 
 Run it regularly. On PythonAnywhere, put it on the *Tasks* tab -- a free
 account gets one daily task, so combine it with the chat purge:
@@ -52,7 +57,7 @@ class Command(BaseCommand):
             self.stdout.write("Nothing synced to Google in that window.")
             return
 
-        counts = {"none": 0, "deleted": 0, "moved": 0, "error": 0}
+        counts = {"none": 0, "deleted": 0, "moved": 0, "accepted": 0, "declined": 0, "error": 0}
         for appointment in appointments:
             if options["dry_run"]:
                 from booking.google_calendar import read_back
@@ -68,6 +73,13 @@ class Command(BaseCommand):
                 self.stdout.write(
                     self.style.WARNING(
                         f"  deleted in Google -> cancelled: {appointment.customer_name}, "
+                        f"{timezone.localtime(appointment.start_at):%d %b %H:%M}"
+                    )
+                )
+            elif change in ("accepted", "declined"):
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"  {change} in Google Calendar: {appointment.customer_name}, "
                         f"{timezone.localtime(appointment.start_at):%d %b %H:%M}"
                     )
                 )

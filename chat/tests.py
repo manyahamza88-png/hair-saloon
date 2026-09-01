@@ -641,3 +641,17 @@ class HiddenAttributeTests(TestCase):
                 r"\[hidden\]\s*\{\s*display:\s*none\s*!important",
                 f"these classes set display and are toggled with hidden: {sorted(set(clashes))}",
             )
+
+    def test_the_widget_offers_ways_to_close_it(self):
+        """Closing was dead while .chat-panel{display:flex} beat [hidden]."""
+        page = self.client.get("/").content.decode()
+        self.assertIn('id="chat-minimise"', page)      # the X in the header
+        self.assertIn("data-chat-dismiss", page)       # End chat / Close
+        js = (
+            __import__("pathlib").Path(
+                __import__("django.conf", fromlist=["settings"]).settings.BASE_DIR
+            )
+            / "static" / "js" / "chat.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn('getElementById("chat-minimise").addEventListener("click", closePanel)', js)
+        self.assertIn('event.key === "Escape"', js)
