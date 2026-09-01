@@ -655,3 +655,93 @@ class HiddenAttributeTests(TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('getElementById("chat-minimise").addEventListener("click", closePanel)', js)
         self.assertIn('event.key === "Escape"', js)
+
+
+class DeskUrlSubstitutionTests(ChatTestCase):
+    """The staff desk builds its action URLs client-side from a data-* template.
+
+    This is exactly the class of bug that unit tests calling views directly
+    never catch: the URLconf was correct, the view was correct, and every
+    test passed, while the *template's JS still 404'd on every click* because
+    the id-substitution regex assumed the id was the last path segment
+    ("/chat/desk/0/" ) when the real URLs have more path after it
+    ("/chat/desk/0/accept/"). Assert the substitution algorithm the page
+    embeds actually reaches the endpoint it claims to.
+    """
+
+    def _real_js_url_substitution(self, template_url: str, conversation_id: int) -> str:
+        """Run the ACTUAL url() function from desk.html's <script> block via Node.
+
+        Re-implementing the substitution logic in Python (as an earlier version
+        of this test did) only proves the Python copy is correct -- it keeps
+        passing even if the real template regresses, because it never reads
+        the file. This extracts the live function and executes it for real,
+        so a change to desk.html's JS is what this test actually exercises.
+        """
+        import subprocess
+        from pathlib import Path
+
+        from django.conf import settings as django_settings
+
+        desk_html = (
+            Path(django_settings.BASE_DIR) / "chat" / "templates" / "chat" / "desk.html"
+        ).read_text(encoding="utf-8")
+        # Line-based extraction (not a regex with an embedded newline class) so
+        # this file's own encoding never fights with the pattern.
+        marker = "function url(template, id)"
+        start = desk_html.find(marker)
+        self.assertGreaterEqual(start, 0, "could not find the url() helper in desk.html to test")
+        line_end = desk_html.find("\n", start)
+        js_function = desk_html[start : line_end if line_end != -1 else len(desk_html)]
+
+        script = (
+            js_function
+            + f'console.log(url({template_url!r}, {conversation_id}));'
+        )
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True, timeout=10
+        )
+        self.assertEqual(result.returncode, 0, f"node failed: {result.stderr}")
+        return result.stdout.strip()
+
+    def test_rendered_action_url_templates_resolve_after_substitution(self):
+        self.client.force_login(self.staff)
+        page = self.client.get(reverse("chat:desk")).content.decode()
+
+        import re
+
+        for attr, name in [
+            ("data-accept-url", "chat:accept"),
+            ("data-reject-url", "chat:reject"),
+            ("data-close-url", "chat:close"),
+            ("data-send-url", "chat:staff_send"),
+        ]:
+            match = re.search(attr + r'="([^"]+)"', page)
+            self.assertIsNotNone(match, f"{attr} missing from the desk page")
+            template_url = match.group(1)
+
+            # Run the real client-side substitution, not a Python re-guess of it.
+            substituted = self._real_js_url_substitution(template_url, 123)
+            expected = reverse(name, args=[123])
+            self.assertEqual(
+                substituted,
+                expected,
+                f"{attr} renders as {template_url!r}; the real url() in desk.html "
+                f"turns it into {substituted!r} but it should be {expected!r} -- "
+                f"any staff click through this template silently 404s otherwise",
+            )
+
+    def test_accepting_through_the_id_substituted_url_actually_works(self):
+        """End-to-end proof, not just string matching: hit the substituted URL."""
+        self.start_chat()
+        conversation = Conversation.objects.get()
+
+        page_template = "/chat/desk/0/accept/"
+        real_url = page_template.replace("/0/", f"/{conversation.pk}/")
+
+        self.client.force_login(self.staff)
+        response = self.client.post(real_url)
+        self.assertNotEqual(response.status_code, 404)
+
+        conversation.refresh_from_db()
+        self.assertEqual(conversation.status, Conversation.STATUS_ACCEPTED)

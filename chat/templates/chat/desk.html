@@ -161,7 +161,10 @@
   var openThreads = {};   // conversation id -> highest rendered message id
   var previousWaiting = 0;
 
-  function url(template, id) { return template.replace(/0\/$/, id + "/"); }
+  // The Django-rendered template URLs look like "/chat/desk/0/accept/" --
+  // the placeholder "0" is a path segment in the middle, not a trailing
+  // token, so it has to be matched as "/0/" and not anchored to the end.
+  function url(template, id) { return template.replace("/0/", "/" + id + "/"); }
 
   function post(target) {
     return fetch(target, {
