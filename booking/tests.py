@@ -475,6 +475,224 @@ class DashboardTests(BaseSalonTest):
         self.assertEqual(appointment.status, Appointment.CONFIRMED)
 
 
+class GoogleOAuthSetupTests(BaseSalonTest):
+    """The admin-panel flow: client credentials, linking, naming calendars."""
+
+    def setUp(self):
+        super().setUp()
+        self.staff = User.objects.create_user("owner", password="pw12345!", is_staff=True)
+        self.client.force_login(self.staff)
+
+    # -- client id / secret ------------------------------------------------
+    def test_setup_page_requires_staff(self):
+        self.client.logout()
+        response = self.client.get(reverse("booking:google_setup"))
+        self.assertEqual(response.status_code, 302)
+
+    def test_saving_the_client_encrypts_the_secret(self):
+        from booking.models import GoogleOAuthClientSettings
+
+        self.client.post(
+            reverse("booking:google_client_save"),
+            {"client_id": "123-abc.apps.googleusercontent.com", "client_secret": "GOCSPX-topsecret"},
+        )
+        client = GoogleOAuthClientSettings.load()
+        self.assertEqual(client.client_id, "123-abc.apps.googleusercontent.com")
+        self.assertTrue(client.is_configured)
+        # Round-trips, but is not readable in the database.
+        self.assertEqual(client.get_client_secret(), "GOCSPX-topsecret")
+        self.assertNotIn("GOCSPX-topsecret", client.client_secret_encrypted)
+
+    def test_blank_secret_keeps_the_stored_one(self):
+        from booking.models import GoogleOAuthClientSettings
+
+        self.client.post(
+            reverse("booking:google_client_save"),
+            {"client_id": "id-1", "client_secret": "secret-1"},
+        )
+        self.client.post(
+            reverse("booking:google_client_save"), {"client_id": "id-2", "client_secret": ""}
+        )
+        client = GoogleOAuthClientSettings.load()
+        self.assertEqual(client.client_id, "id-2")
+        self.assertEqual(client.get_client_secret(), "secret-1")
+
+    def test_effective_never_mixes_database_and_env(self):
+        from booking.models import GoogleOAuthClientSettings
+
+        with self.settings(GOOGLE_OAUTH_CLIENT_ID="env-id", GOOGLE_OAUTH_CLIENT_SECRET="env-secret"):
+            self.assertEqual(GoogleOAuthClientSettings.effective(), ("env-id", "env-secret"))
+
+            client = GoogleOAuthClientSettings.load()
+            client.client_id = "db-id"
+            client.set_client_secret("db-secret")
+            client.save()
+            self.assertEqual(GoogleOAuthClientSettings.effective(), ("db-id", "db-secret"))
+
+    def test_connect_is_refused_without_a_client(self):
+        response = self.client.get(reverse("booking:google_connect"), follow=True)
+        self.assertContains(response, "Client ID")
+        self.assertRedirects(response, reverse("booking:google_setup"))
+
+    def test_connect_redirects_to_google(self):
+        from booking.models import GoogleOAuthClientSettings
+
+        client = GoogleOAuthClientSettings.load()
+        client.client_id = "123-abc.apps.googleusercontent.com"
+        client.set_client_secret("GOCSPX-x")
+        client.save()
+
+        response = self.client.get(reverse("booking:google_connect"))
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith("https://accounts.google.com/o/oauth2/auth"))
+        # A refresh token requires offline access, and PKCE is mandatory here.
+        for expected in ("access_type=offline", "prompt=consent", "code_challenge"):
+            self.assertIn(expected, response["Location"])
+        self.assertIn("google_oauth_code_verifier", self.client.session)
+
+    # -- callback ----------------------------------------------------------
+    def _fake_creds(self, refresh="refresh-abc"):
+        return mock.Mock(
+            token="access-xyz",
+            refresh_token=refresh,
+            expiry=dt.datetime(2030, 1, 1, 12, 0),
+            scopes=["https://www.googleapis.com/auth/calendar"],
+        )
+
+    def test_callback_stores_an_encrypted_refresh_token(self):
+        with mock.patch("booking.google_oauth.finish", return_value=self._fake_creds()), \
+             mock.patch("booking.google_oauth.account_email", return_value="salon@gmail.com"):
+            response = self.client.get(reverse("booking:google_callback"), {"code": "x", "state": "y"})
+
+        self.assertRedirects(response, reverse("booking:google_setup"))
+        credential = GoogleCredential.objects.get(auth_type=GoogleCredential.OAUTH)
+        self.assertTrue(credential.is_connected)
+        self.assertEqual(credential.oauth_account_email, "salon@gmail.com")
+        self.assertEqual(credential.get_refresh_token(), "refresh-abc")
+        self.assertNotIn("refresh-abc", credential.oauth_refresh_token)
+        self.assertIsNotNone(credential.oauth_token_expiry)
+        self.assertTrue(timezone.is_aware(credential.oauth_token_expiry))
+
+    def test_cancelled_consent_is_reported(self):
+        response = self.client.get(
+            reverse("booking:google_callback"), {"error": "access_denied"}, follow=True
+        )
+        self.assertContains(response, "cancelled")
+        self.assertFalse(GoogleCredential.objects.exists())
+
+    def test_reconnect_without_a_new_refresh_token_keeps_the_old_one(self):
+        with mock.patch("booking.google_oauth.finish", return_value=self._fake_creds()), \
+             mock.patch("booking.google_oauth.account_email", return_value="salon@gmail.com"):
+            self.client.get(reverse("booking:google_callback"), {"code": "x"})
+
+        # Google omits the refresh token on a repeat authorisation.
+        with mock.patch("booking.google_oauth.finish", return_value=self._fake_creds(refresh=None)), \
+             mock.patch("booking.google_oauth.account_email", return_value="salon@gmail.com"):
+            self.client.get(reverse("booking:google_callback"), {"code": "x"})
+
+        credential = GoogleCredential.objects.get(auth_type=GoogleCredential.OAUTH)
+        self.assertEqual(credential.get_refresh_token(), "refresh-abc")
+
+    def test_disconnect_clears_the_tokens_but_keeps_calendars(self):
+        with mock.patch("booking.google_oauth.finish", return_value=self._fake_creds()), \
+             mock.patch("booking.google_oauth.account_email", return_value="salon@gmail.com"):
+            self.client.get(reverse("booking:google_callback"), {"code": "x"})
+        credential = GoogleCredential.objects.get(auth_type=GoogleCredential.OAUTH)
+        self.calendar.credential = credential
+        self.calendar.save()
+
+        self.client.post(reverse("booking:google_disconnect"))
+
+        credential.refresh_from_db()
+        self.assertFalse(credential.is_connected)
+        self.assertTrue(Calendar.objects.filter(pk=self.calendar.pk).exists())
+
+    # -- adding named calendars -------------------------------------------
+    def _connect(self):
+        with mock.patch("booking.google_oauth.finish", return_value=self._fake_creds()), \
+             mock.patch("booking.google_oauth.account_email", return_value="salon@gmail.com"):
+            self.client.get(reverse("booking:google_callback"), {"code": "x"})
+        return GoogleCredential.objects.get(auth_type=GoogleCredential.OAUTH)
+
+    def test_setup_page_lists_the_accounts_calendars(self):
+        self._connect()
+        listing = [
+            {"id": "a@group.calendar.google.com", "summary": "Maria", "access_role": "owner", "primary": False},
+            {"id": "b@group.calendar.google.com", "summary": "Ben", "access_role": "reader", "primary": False},
+        ]
+        with mock.patch("booking.google_calendar.list_calendars", return_value=listing):
+            response = self.client.get(reverse("booking:google_setup"))
+
+        self.assertContains(response, "Maria")
+        self.assertContains(response, "Ben")
+        # A read-only calendar cannot take bookings, so it offers no Add button.
+        self.assertContains(response, "Read-only access")
+
+    def test_adding_a_calendar_puts_it_on_the_homepage(self):
+        credential = self._connect()
+        response = self.client.post(
+            reverse("booking:google_add_calendar"),
+            {
+                "calendar_id": "a@group.calendar.google.com",
+                "name": "Maria - Colour & Cuts",
+                "owner_email": "maria@example.com",
+            },
+        )
+        self.assertRedirects(response, reverse("booking:google_setup"))
+
+        calendar = Calendar.objects.get(google_calendar_id="a@group.calendar.google.com")
+        self.assertEqual(calendar.name, "Maria - Colour & Cuts")
+        self.assertEqual(calendar.owner_email, "maria@example.com")
+        self.assertEqual(calendar.credential, credential)
+        self.assertTrue(calendar.is_google_connected)
+
+        self.client.logout()
+        home = self.client.get(reverse("booking:home"))
+        self.assertContains(home, "Maria - Colour &amp; Cuts")
+
+    def test_owner_email_defaults_to_the_connected_account(self):
+        self._connect()
+        self.client.post(
+            reverse("booking:google_add_calendar"),
+            {"calendar_id": "a@group.calendar.google.com", "name": "Chair 1", "owner_email": ""},
+        )
+        calendar = Calendar.objects.get(google_calendar_id="a@group.calendar.google.com")
+        self.assertEqual(calendar.owner_email, "salon@gmail.com")
+
+    def test_the_same_calendar_cannot_be_added_twice(self):
+        self._connect()
+        payload = {
+            "calendar_id": "a@group.calendar.google.com",
+            "name": "Maria",
+            "owner_email": "maria@example.com",
+        }
+        self.client.post(reverse("booking:google_add_calendar"), payload)
+        self.client.post(reverse("booking:google_add_calendar"), dict(payload, name="Duplicate"))
+        self.assertEqual(
+            Calendar.objects.filter(google_calendar_id="a@group.calendar.google.com").count(), 1
+        )
+
+    def test_adding_requires_a_connected_account(self):
+        response = self.client.post(
+            reverse("booking:google_add_calendar"),
+            {"calendar_id": "a@x", "name": "Maria", "owner_email": "m@example.com"},
+            follow=True,
+        )
+        self.assertContains(response, "Connect a Google account first")
+        self.assertFalse(Calendar.objects.filter(google_calendar_id="a@x").exists())
+
+    # -- the PythonAnywhere proxy quirk ------------------------------------
+    def test_callback_url_is_forced_to_https(self):
+        from booking.google_oauth import force_https
+
+        self.assertEqual(force_https("http://salon.pythonanywhere.com/x/"),
+                         "https://salon.pythonanywhere.com/x/")
+        self.assertEqual(force_https("https://salon.pythonanywhere.com/x/"),
+                         "https://salon.pythonanywhere.com/x/")
+        # ...but local development stays on http.
+        self.assertEqual(force_https("http://127.0.0.1:8000/x/"), "http://127.0.0.1:8000/x/")
+
+
 class GoogleIntegrationTests(BaseSalonTest):
     """The Google layer is exercised with a stubbed API client."""
 
@@ -524,6 +742,89 @@ class GoogleIntegrationTests(BaseSalonTest):
         self.assertEqual(appointment.status, Appointment.PENDING)
         self.assertIn("Google is down", appointment.google_sync_error)
         self.assertEqual(len(mail.outbox), 2)  # the humans were still told
+
+    def test_service_account_does_not_attach_attendees(self):
+        """Google rejects attendees from a plain service account."""
+        from booking.google_calendar import _event_body, can_invite_attendees
+
+        self.assertFalse(can_invite_attendees(self.credential))
+        appointment = self.make_appointment()
+        body = _event_body(
+            appointment, self.salon, allow_attendees=can_invite_attendees(self.credential)
+        )
+        self.assertNotIn("attendees", body)
+        # The customer is still recorded, just in the description.
+        self.assertIn("ana@example.com", body["description"])
+
+    def test_delegated_service_account_may_invite(self):
+        from booking.google_calendar import can_invite_attendees
+
+        self.credential.delegated_user = "boss@salon.example"
+        self.assertTrue(can_invite_attendees(self.credential))
+
+    def test_oauth_credential_may_invite(self):
+        from booking.google_calendar import can_invite_attendees
+
+        oauth = GoogleCredential(
+            name="Personal", auth_type=GoogleCredential.OAUTH, oauth_refresh_token="x"
+        )
+        self.assertTrue(can_invite_attendees(oauth))
+
+    def test_provisioning_creates_and_shares_a_calendar(self):
+        from booking.services import provision_google_calendar
+
+        fresh = Calendar.objects.create(
+            name="Ben",
+            credential=self.credential,
+            owner_email="ben@example.com",
+        )
+        self.assertEqual(fresh.google_calendar_id, "")
+
+        with mock.patch(
+            "booking.google_calendar.create_calendar", return_value="new-cal-id"
+        ) as create, mock.patch("booking.google_calendar.grant_calendar_access") as grant:
+            calendar_id = provision_google_calendar(fresh)
+
+        self.assertEqual(calendar_id, "new-cal-id")
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.google_calendar_id, "new-cal-id")
+        self.assertTrue(fresh.is_google_connected)
+        self.assertEqual(fresh.last_sync_error, "")
+
+        # Named after the salon, and shared with the owner.
+        self.assertIn("Ben", create.call_args.kwargs["name"])
+        self.assertEqual(grant.call_args.args[2], "ben@example.com")
+
+    def test_provisioning_refuses_to_replace_an_existing_calendar(self):
+        from booking.services import provision_google_calendar
+
+        with self.assertRaises(ValueError):
+            provision_google_calendar(self.calendar)  # already has an ID
+
+    def test_provisioning_needs_a_credential(self):
+        from booking.services import provision_google_calendar
+
+        orphan = Calendar.objects.create(name="No creds", owner_email="x@example.com")
+        with self.assertRaises(ValueError):
+            provision_google_calendar(orphan)
+
+    def test_a_failed_share_keeps_the_new_calendar(self):
+        from booking.services import provision_google_calendar
+
+        fresh = Calendar.objects.create(
+            name="Ben", credential=self.credential, owner_email="ben@example.com"
+        )
+        with mock.patch("booking.google_calendar.create_calendar", return_value="new-cal-id"), \
+             mock.patch(
+                 "booking.google_calendar.grant_calendar_access",
+                 side_effect=RuntimeError("quota exceeded"),
+             ):
+            calendar_id = provision_google_calendar(fresh)
+
+        self.assertEqual(calendar_id, "new-cal-id")
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.google_calendar_id, "new-cal-id")  # not lost
+        self.assertIn("quota exceeded", fresh.last_sync_error)
 
     def test_google_busy_blocks_hide_slots(self):
         self.salon.respect_google_busy = True

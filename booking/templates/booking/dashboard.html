@@ -152,7 +152,10 @@
         </tr>
       {% endfor %}
     </table>
-    <p style="margin-top:.9rem"><a class="btn btn-sm btn-ghost" href="/admin/booking/calendar/add/">Add a calendar</a></p>
+    <p style="margin-top:.9rem">
+      <a class="btn btn-sm" href="{% url 'booking:google_setup' %}">Google setup</a>
+      <a class="btn btn-sm btn-ghost" href="/admin/booking/calendar/add/">Add a calendar</a>
+    </p>
   </div>
 
   <div class="panel">

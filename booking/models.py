@@ -26,6 +26,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
 
+from hairsaloon.crypto import decrypt_value, encrypt_value
+
 WEEKDAYS = [
     (0, "Monday"),
     (1, "Tuesday"),
@@ -128,6 +130,75 @@ class SalonSettings(models.Model):
 
 
 # ---------------------------------------------------------------------------
+# Google OAuth client (the Cloud console app itself)
+# ---------------------------------------------------------------------------
+class GoogleOAuthClientSettings(models.Model):
+    """The Client ID / Client Secret of the Google Cloud OAuth application.
+
+    Entered once by a superuser, then used to link Google accounts through the
+    browser. The secret is encrypted at rest with the same Fernet helper as the
+    tokens themselves.
+
+    ``effective()`` returns a *consistent* pair -- entirely from the database
+    when a client ID is stored, otherwise entirely from settings/.env -- so a
+    new client ID is never accidentally paired with an old secret.
+    """
+
+    client_id = models.CharField(
+        "Google Client ID",
+        max_length=255,
+        blank=True,
+        help_text="Looks like 123456789-abc123.apps.googleusercontent.com",
+    )
+    client_secret_encrypted = models.TextField(
+        "Google Client Secret", blank=True, editable=False
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Google OAuth client"
+        verbose_name_plural = "Google OAuth client"
+
+    def __str__(self) -> str:
+        return f"Google OAuth client ({self.client_id or 'not configured'})"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1  # singleton
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls) -> "GoogleOAuthClientSettings":
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def set_client_secret(self, plaintext: str) -> None:
+        self.client_secret_encrypted = encrypt_value(plaintext) if plaintext else ""
+
+    def get_client_secret(self) -> str:
+        return decrypt_value(self.client_secret_encrypted)
+
+    @property
+    def has_secret(self) -> bool:
+        return bool(self.client_secret_encrypted)
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.client_id and self.client_secret_encrypted)
+
+    @classmethod
+    def effective(cls) -> tuple[str, str]:
+        """The (client_id, client_secret) pair to use for OAuth.
+
+        Database values win when a client ID has been entered in the admin;
+        otherwise fall back to settings/.env. The two are never mixed.
+        """
+        obj = cls.load()
+        if obj.client_id:
+            return obj.client_id, obj.get_client_secret()
+        return settings.GOOGLE_OAUTH_CLIENT_ID, settings.GOOGLE_OAUTH_CLIENT_SECRET
+
+
+# ---------------------------------------------------------------------------
 # Google credentials
 # ---------------------------------------------------------------------------
 class GoogleCredential(models.Model):
@@ -175,8 +246,13 @@ class GoogleCredential(models.Model):
 
     oauth_client_id = models.CharField(max_length=255, blank=True)
     oauth_client_secret = models.CharField(max_length=255, blank=True)
+    # Encrypted at rest: a refresh token is full read/write access to a calendar.
     oauth_refresh_token = models.TextField(blank=True)
+    oauth_access_token = models.TextField(blank=True, editable=False)
+    oauth_token_expiry = models.DateTimeField(null=True, blank=True, editable=False)
+    oauth_scopes = models.TextField(blank=True, editable=False)
     oauth_account_email = models.EmailField(blank=True, help_text="Filled in automatically after connecting.")
+    connected_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     api_key = models.CharField(
         max_length=255,
@@ -195,6 +271,31 @@ class GoogleCredential(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.get_auth_type_display()})"
+
+    # -- encrypted accessors ----------------------------------------------
+    def set_refresh_token(self, plaintext: str) -> None:
+        self.oauth_refresh_token = encrypt_value(plaintext) if plaintext else ""
+
+    def get_refresh_token(self) -> str:
+        return decrypt_value(self.oauth_refresh_token)
+
+    def set_access_token(self, plaintext: str) -> None:
+        self.oauth_access_token = encrypt_value(plaintext) if plaintext else ""
+
+    def get_access_token(self) -> str:
+        return decrypt_value(self.oauth_access_token)
+
+    def set_oauth_client_secret(self, plaintext: str) -> None:
+        self.oauth_client_secret = encrypt_value(plaintext) if plaintext else ""
+
+    def get_oauth_client_secret(self) -> str:
+        return decrypt_value(self.oauth_client_secret)
+
+    @property
+    def is_connected(self) -> bool:
+        if self.auth_type == self.OAUTH:
+            return bool(self.oauth_refresh_token)
+        return bool(self.service_account_json.strip())
 
     @property
     def service_account_email(self) -> str:
@@ -222,7 +323,8 @@ class GoogleCredential(models.Model):
         elif self.auth_type == self.OAUTH:
             if not self.oauth_refresh_token.strip():
                 raise ValidationError(
-                    {"oauth_refresh_token": "Connect a Google account (or paste a refresh token)."}
+                    "This credential has no connected Google account yet. "
+                    "Open Google setup and click 'Connect a Google account'."
                 )
 
 
@@ -242,9 +344,12 @@ class Calendar(models.Model):
 
     google_calendar_id = models.CharField(
         max_length=255,
+        blank=True,
         help_text=(
-            "The Google Calendar ID: 'primary', an address like name@gmail.com, or the long "
-            "...@group.calendar.google.com id from Calendar settings."
+            "Leave this empty and use the 'Create a new Google calendar' action: the credential "
+            "makes the calendar itself, so nothing has to be set up inside a Google account. "
+            "Otherwise paste an existing Calendar ID ('primary', name@gmail.com, or a "
+            "...@group.calendar.google.com id) and share that calendar with the credential."
         ),
     )
     credential = models.ForeignKey(

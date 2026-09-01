@@ -12,9 +12,25 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
-from . import availability, services as booking_services, tokens
+from django.conf import settings as settings_module
+
+from . import (
+    availability,
+    google_calendar,
+    google_oauth,
+    services as booking_services,
+    tokens,
+)
 from .forms import BookingForm, CancelForm, DecisionForm, StaffAppointmentForm
-from .models import Appointment, Calendar, SalonSettings, Service, TimeOff
+from .models import (
+    Appointment,
+    Calendar,
+    GoogleCredential,
+    GoogleOAuthClientSettings,
+    SalonSettings,
+    Service,
+    TimeOff,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -395,6 +411,176 @@ def dashboard_decide(request, public_id):
         messages.error(request, "Unknown action.")
 
     return redirect("booking:dashboard")
+
+
+# ---------------------------------------------------------------------------
+# Google setup: client credentials, account linking, calendar picker
+# ---------------------------------------------------------------------------
+OAUTH_CREDENTIAL_NAME = "Connected Google account"
+
+
+def _oauth_credential(create: bool = False):
+    """The single credential row used by the browser OAuth flow."""
+    credential = GoogleCredential.objects.filter(auth_type=GoogleCredential.OAUTH).first()
+    if credential is None and create:
+        credential = GoogleCredential.objects.create(
+            name=OAUTH_CREDENTIAL_NAME, auth_type=GoogleCredential.OAUTH
+        )
+    return credential
+
+
+@staff_member_required
+def google_setup(request):
+    """One page for the whole Google integration."""
+    client = GoogleOAuthClientSettings.load()
+    credential = _oauth_credential()
+
+    google_calendars, listing_error = [], ""
+    if credential and credential.is_connected:
+        try:
+            google_calendars = google_calendar.list_calendars(credential)
+        except Exception as exc:  # noqa: BLE001 - shown on the page
+            listing_error = str(exc)
+
+    linked = {
+        calendar.google_calendar_id: calendar
+        for calendar in Calendar.objects.exclude(google_calendar_id="")
+    }
+    for item in google_calendars:
+        item["linked"] = linked.get(item["id"])
+        item["writable"] = item.get("access_role") in {"owner", "writer"}
+
+    return render(
+        request,
+        "booking/google_setup.html",
+        {
+            "salon": SalonSettings.load(),
+            "client": client,
+            "credential": credential,
+            "connected": bool(credential and credential.is_connected),
+            "google_calendars": google_calendars,
+            "listing_error": listing_error,
+            "callback_url": google_oauth.callback_url(request),
+            "env_fallback": bool(
+                not client.client_id and settings_module.GOOGLE_OAUTH_CLIENT_ID
+            ),
+        },
+    )
+
+
+@staff_member_required
+@require_POST
+def google_client_save(request):
+    """Store the Client ID / Client Secret from the Cloud console."""
+    client = GoogleOAuthClientSettings.load()
+    client_id = request.POST.get("client_id", "").strip()
+    secret = request.POST.get("client_secret", "").strip()
+
+    client.client_id = client_id
+    # An empty secret box means "keep the one already stored", so that the page
+    # can be re-saved without retyping it.
+    if secret:
+        client.set_client_secret(secret)
+    elif not client_id:
+        client.set_client_secret("")
+    client.save()
+
+    if client.is_configured:
+        messages.success(request, "Google client saved. You can connect an account now.")
+    else:
+        messages.warning(request, "Saved, but both a Client ID and a Client Secret are needed.")
+    return redirect("booking:google_setup")
+
+
+@staff_member_required
+def google_connect(request):
+    """Send the admin to Google's consent screen."""
+    client_id, client_secret = GoogleOAuthClientSettings.effective()
+    try:
+        auth_url = google_oauth.start(request, client_id, client_secret)
+    except Exception as exc:  # noqa: BLE001
+        messages.error(request, str(exc))
+        return redirect("booking:google_setup")
+    return redirect(auth_url)
+
+
+@staff_member_required
+def google_callback(request):
+    """Where Google sends the browser back after consent."""
+    if request.GET.get("error"):
+        messages.error(request, f"Google sign-in was cancelled: {request.GET['error']}")
+        return redirect("booking:google_setup")
+
+    client_id, client_secret = GoogleOAuthClientSettings.effective()
+    try:
+        creds = google_oauth.finish(request, client_id, client_secret)
+        email = google_oauth.account_email(creds)
+        credential = _oauth_credential(create=True)
+        if not creds.refresh_token and not credential.get_refresh_token():
+            messages.error(
+                request,
+                "Google did not return a refresh token. Remove this app at "
+                "myaccount.google.com/permissions and connect again.",
+            )
+            return redirect("booking:google_setup")
+        google_oauth.store(credential, creds, email)
+    except Exception as exc:  # noqa: BLE001 - reported on the page
+        logger.exception("Google OAuth callback failed")
+        messages.error(request, f"Could not connect: {exc}")
+        return redirect("booking:google_setup")
+
+    messages.success(
+        request,
+        f"Connected to {email or 'your Google account'}. Now add the calendars you want to show.",
+    )
+    return redirect("booking:google_setup")
+
+
+@staff_member_required
+@require_POST
+def google_disconnect(request):
+    credential = _oauth_credential()
+    if credential:
+        if request.POST.get("revoke"):
+            google_oauth.revoke(credential)
+        google_oauth.disconnect(credential)
+        messages.info(request, "Google account disconnected. Existing bookings are untouched.")
+    return redirect("booking:google_setup")
+
+
+@staff_member_required
+@require_POST
+def google_add_calendar(request):
+    """Add one of the connected account's calendars to the homepage."""
+    credential = _oauth_credential()
+    if not (credential and credential.is_connected):
+        messages.error(request, "Connect a Google account first.")
+        return redirect("booking:google_setup")
+
+    calendar_id = request.POST.get("calendar_id", "").strip()
+    name = request.POST.get("name", "").strip()
+    owner_email = request.POST.get("owner_email", "").strip() or credential.oauth_account_email
+
+    if not calendar_id or not name:
+        messages.error(request, "A calendar and a display name are both required.")
+        return redirect("booking:google_setup")
+
+    if Calendar.objects.filter(google_calendar_id=calendar_id).exists():
+        messages.warning(request, f"{name}: that Google calendar is already on the site.")
+        return redirect("booking:google_setup")
+
+    calendar = Calendar.objects.create(
+        name=name,
+        google_calendar_id=calendar_id,
+        credential=credential,
+        owner_email=owner_email,
+        sort_order=Calendar.objects.count(),
+    )
+    messages.success(
+        request,
+        f"Added '{calendar.name}' to the homepage. Set its opening hours and photo any time.",
+    )
+    return redirect("booking:google_setup")
 
 
 @staff_member_required

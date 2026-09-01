@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+
+{% block title %}Google setup - {{ salon.name }}{% endblock %}
+
+{% block content %}
+<p class="small"><a href="{% url 'booking:dashboard' %}">&larr; Dashboard</a></p>
+<h1>Google setup</h1>
+<p class="lede">
+  Link one Google account, then choose which of its calendars appear on the
+  homepage and what customers should call them.
+</p>
+
+<!-- Step 1: the Cloud console client ------------------------------------ -->
+<div class="panel" style="margin-bottom:1.2rem">
+  <h2 style="margin-top:0">
+    1. Google Client ID &amp; Secret
+    {% if client.is_configured %}<span class="badge badge-confirmed">saved</span>
+    {% elif env_fallback %}<span class="badge badge-pending">from .env</span>
+    {% else %}<span class="badge badge-cancelled">not set</span>{% endif %}
+  </h2>
+
+  <p class="small muted">
+    In the <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google
+    Cloud console</a>: enable the <strong>Google Calendar API</strong>, then
+    <strong>Create credentials &rarr; OAuth client ID &rarr; Web application</strong>.
+  </p>
+
+  <div class="alert alert-info">
+    Add this exact <strong>Authorised redirect URI</strong> to that OAuth client:
+    <br><code id="cb-url">{{ callback_url }}</code>
+    <button type="button" class="btn btn-sm btn-ghost" style="margin-left:.5rem"
+            onclick="navigator.clipboard.writeText(document.getElementById('cb-url').textContent.trim());this.textContent='Copied';">
+      Copy
+    </button>
+    <div class="small" style="margin-top:.4rem">
+      It must match character for character, including <code>https://</code> and the trailing slash.
+    </div>
+  </div>
+
+  <form method="post" action="{% url 'booking:google_client_save' %}">
+    {% csrf_token %}
+    <div class="field">
+      <label for="client_id">Client ID</label>
+      <input type="text" id="client_id" name="client_id" class="field-input"
+             value="{{ client.client_id }}"
+             placeholder="123456789-abc123.apps.googleusercontent.com" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="client_secret">Client Secret</label>
+      <input type="password" id="client_secret" name="client_secret" class="field-input"
+             placeholder="{% if client.has_secret %}•••••••• (stored, leave blank to keep){% else %}GOCSPX-...{% endif %}"
+             autocomplete="off">
+      <p class="help">Stored encrypted. Leave blank to keep the saved one.</p>
+    </div>
+    <button class="btn" type="submit">Save client</button>
+  </form>
+</div>
+
+<!-- Step 2: link the account -------------------------------------------- -->
+<div class="panel" style="margin-bottom:1.2rem">
+  <h2 style="margin-top:0">
+    2. Connect a Google account
+    {% if connected %}<span class="badge badge-confirmed">connected</span>
+    {% else %}<span class="badge badge-cancelled">not connected</span>{% endif %}
+  </h2>
+
+  {% if connected %}
+    <div class="summary-line">
+      <span>Account</span>
+      <span><strong>{{ credential.oauth_account_email|default:"(unknown address)" }}</strong></span>
+    </div>
+    <div class="summary-line"><span>Access</span><span>Full read &amp; write to this account's calendars</span></div>
+    <div class="summary-line"><span>Connected</span><span>{{ credential.connected_at|date:"j M Y, H:i" }}</span></div>
+
+    <div class="actions">
+      <a class="btn btn-ghost" href="{% url 'booking:google_connect' %}">Reconnect / switch account</a>
+      <form class="inline-form" method="post" action="{% url 'booking:google_disconnect' %}"
+            onsubmit="return confirm('Disconnect this Google account? Bookings stay, but they will stop syncing.');">
+        {% csrf_token %}
+        <label class="small muted" style="margin-right:.5rem">
+          <input type="checkbox" name="revoke" value="1"> also revoke at Google
+        </label>
+        <button class="btn btn-sm btn-danger" type="submit">Disconnect</button>
+      </form>
+    </div>
+  {% else %}
+    <p class="small muted">
+      You will be sent to Google to sign in and approve access. The account you pick
+      is the one whose calendars this site can read and write.
+    </p>
+    {% if client.is_configured or env_fallback %}
+      <a class="btn" href="{% url 'booking:google_connect' %}">Connect a Google account</a>
+    {% else %}
+      <button class="btn" disabled>Connect a Google account</button>
+      <p class="help">Save a Client ID and Client Secret above first.</p>
+    {% endif %}
+  {% endif %}
+</div>
+
+<!-- Step 3: pick calendars ---------------------------------------------- -->
+<div class="panel">
+  <h2 style="margin-top:0">3. Add calendars to the homepage</h2>
+
+  {% if not connected %}
+    <div class="empty-state">Connect a Google account above to see its calendars.</div>
+  {% elif listing_error %}
+    <div class="alert alert-error">
+      Could not list the calendars: {{ listing_error }}
+      <div class="small" style="margin-top:.4rem">
+        If this says the token expired, use <strong>Reconnect</strong> above.
+      </div>
+    </div>
+  {% elif not google_calendars %}
+    <div class="empty-state">This Google account has no calendars.</div>
+  {% else %}
+    <p class="small muted">
+      Each one you add becomes a card on the homepage that customers can book against.
+      Give it the name customers should see &mdash; it does not have to match the Google name.
+    </p>
+
+    <div class="table-wrap">
+      <table class="list">
+        <tr>
+          <th>Google calendar</th>
+          <th>Access</th>
+          <th style="width:44%">Show on the homepage as</th>
+        </tr>
+        {% for item in google_calendars %}
+          <tr>
+            <td>
+              <strong>{{ item.summary|default:item.id }}</strong>
+              {% if item.primary %}<span class="badge badge-pending">primary</span>{% endif %}
+              <div class="small muted">{{ item.id }}</div>
+            </td>
+            <td class="small">
+              {% if item.writable %}
+                <span style="color:#15803d">{{ item.access_role }}</span>
+              {% else %}
+                <span style="color:#b45309" title="Bookings cannot be written to this calendar">
+                  {{ item.access_role }}
+                </span>
+              {% endif %}
+            </td>
+            <td>
+              {% if item.linked %}
+                <span class="badge badge-confirmed">on the site</span>
+                as <strong>{{ item.linked.name }}</strong>
+                <div class="small">
+                  <a href="/admin/booking/calendar/{{ item.linked.pk }}/change/">Edit</a> &middot;
+                  <a href="{{ item.linked.get_absolute_url }}">View booking page</a>
+                </div>
+              {% elif not item.writable %}
+                <span class="small muted">
+                  Read-only access &mdash; this app could not write bookings into it.
+                </span>
+              {% else %}
+                <form method="post" action="{% url 'booking:google_add_calendar' %}"
+                      style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:flex-start">
+                  {% csrf_token %}
+                  <input type="hidden" name="calendar_id" value="{{ item.id }}">
+                  <input type="text" name="name" class="field-input" style="flex:1;min-width:150px"
+                         value="{{ item.summary }}" placeholder="e.g. Maria - Colour &amp; Cuts" required>
+                  <input type="email" name="owner_email" class="field-input" style="flex:1;min-width:150px"
+                         value="{{ credential.oauth_account_email }}"
+                         placeholder="Accept/decline emails to" required>
+                  <button class="btn btn-sm" type="submit">Add</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </table>
+    </div>
+
+    <p class="help" style="margin-top:.9rem">
+      <strong>Owner email</strong> is where the accept / decline notifications go for that
+      calendar. It defaults to the connected account, but you can send a stylist's
+      bookings to their own address.
+    </p>
+  {% endif %}
+</div>
+
+<p class="small muted" style="margin-top:1.2rem">
+  Prefer a service account instead? That route still works &mdash;
+  see <a href="/admin/booking/googlecredential/">Google credentials</a> in the admin.
+</p>
+{% endblock %}

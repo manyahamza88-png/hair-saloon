@@ -50,6 +50,15 @@ def libraries_available() -> bool:
 # ---------------------------------------------------------------------------
 # Credentials -> API client
 # ---------------------------------------------------------------------------
+def _naive_utc(value: dt.datetime | None) -> dt.datetime | None:
+    """google-auth compares ``expiry`` against a naive UTC ``utcnow()``."""
+    if value is None:
+        return None
+    if timezone.is_aware(value):
+        return value.astimezone(dt.timezone.utc).replace(tzinfo=None)
+    return value
+
+
 def _credentials_for(credential, readonly: bool = False):
     from google.oauth2 import service_account
     from google.oauth2.credentials import Credentials as UserCredentials
@@ -69,19 +78,34 @@ def _credentials_for(credential, readonly: bool = False):
         return creds
 
     if credential.auth_type == credential.OAUTH:
-        if not credential.oauth_refresh_token:
-            raise GoogleNotConfigured("This credential has no refresh token yet.")
-        client_id = credential.oauth_client_id or settings.GOOGLE_OAUTH_CLIENT_ID
-        client_secret = credential.oauth_client_secret or settings.GOOGLE_OAUTH_CLIENT_SECRET
-        if not client_id or not client_secret:
-            raise GoogleNotConfigured("OAuth client id / secret missing.")
+        refresh_token = credential.get_refresh_token()
+        if not refresh_token:
+            raise GoogleNotConfigured(
+                "This Google account is not connected yet. Open Google setup and "
+                "click 'Connect a Google account'."
+            )
+
+        from .models import GoogleOAuthClientSettings
+
+        # A credential may carry its own client (e.g. one imported from the
+        # command line); otherwise use the app-wide client from the admin.
+        client_id = credential.oauth_client_id
+        client_secret = credential.get_oauth_client_secret()
+        if not (client_id and client_secret):
+            client_id, client_secret = GoogleOAuthClientSettings.effective()
+        if not (client_id and client_secret):
+            raise GoogleNotConfigured(
+                "No Google Client ID / Client Secret configured. Add them under Google setup."
+            )
+
         return UserCredentials(
-            token=None,
-            refresh_token=credential.oauth_refresh_token,
+            token=credential.get_access_token() or None,
+            refresh_token=refresh_token,
             token_uri="https://oauth2.googleapis.com/token",
             client_id=client_id,
             client_secret=client_secret,
             scopes=scopes,
+            expiry=_naive_utc(credential.oauth_token_expiry),
         )
 
     raise GoogleNotConfigured(f"Unknown auth type {credential.auth_type!r}.")
@@ -176,6 +200,59 @@ def list_calendars(credential) -> list[dict]:
     ]
 
 
+# ---------------------------------------------------------------------------
+# Provisioning: let the credential own the calendar
+# ---------------------------------------------------------------------------
+def create_calendar(credential, name: str, timezone_name: str, description: str = "") -> str:
+    """Create a brand-new Google calendar owned by this credential.
+
+    This is the route that needs nothing configured inside anybody's Google
+    account: the service account creates the calendar, so it already has full
+    access to it. Returns the new calendar ID.
+    """
+    service = build_service(credential)
+    body = {"summary": name, "timeZone": timezone_name}
+    if description:
+        body["description"] = description
+    try:
+        created = service.calendars().insert(body=body).execute()
+    except Exception as exc:  # noqa: BLE001
+        raise _wrap(exc) from exc
+    return created.get("id", "")
+
+
+def grant_calendar_access(credential, calendar_id: str, email: str, role: str = "writer",
+                          notify: bool = True) -> None:
+    """Share a calendar the credential owns with a human.
+
+    Note the direction of travel: the app grants access outwards, through the
+    API. The person receiving it does not configure anything -- the calendar
+    simply turns up in their Google Calendar.
+
+    ``role`` is ``writer`` (see and edit events) or ``owner`` (also rename or
+    delete the calendar).
+    """
+    if not email:
+        return
+    service = build_service(credential)
+    rule = {"scope": {"type": "user", "value": email}, "role": role}
+    try:
+        service.acl().insert(
+            calendarId=calendar_id, body=rule, sendNotifications=notify
+        ).execute()
+    except Exception as exc:  # noqa: BLE001
+        raise _wrap(exc) from exc
+
+
+def delete_calendar(credential, calendar_id: str) -> None:
+    """Permanently delete a calendar the credential owns."""
+    service = build_service(credential)
+    try:
+        service.calendars().delete(calendarId=calendar_id).execute()
+    except Exception as exc:  # noqa: BLE001
+        raise _wrap(exc) from exc
+
+
 def free_busy(calendar, start: dt.datetime, end: dt.datetime) -> list[BusyBlock]:
     """Busy blocks for one calendar between two aware datetimes."""
     service = build_service(calendar.credential, readonly=True)
@@ -232,7 +309,23 @@ def _record_calendar_error(calendar, message: str) -> None:
 # ---------------------------------------------------------------------------
 # Write side
 # ---------------------------------------------------------------------------
-def _event_body(appointment, salon) -> dict:
+def can_invite_attendees(credential) -> bool:
+    """Whether this credential may add attendees to an event.
+
+    Google refuses ``attendees`` from a plain service account with
+    ``forbiddenForServiceAccounts``: only a real user (OAuth) or a service
+    account using domain-wide delegation may invite people. That is not a
+    problem for us -- the salon sends its own confirmation emails -- so we just
+    leave the attendee list off and put the customer in the description.
+    """
+    if credential is None:
+        return False
+    if credential.auth_type == credential.OAUTH:
+        return True
+    return bool(credential.delegated_user)
+
+
+def _event_body(appointment, salon, allow_attendees: bool = False) -> dict:
     from .models import Appointment
 
     status_word = {
@@ -265,7 +358,7 @@ def _event_body(appointment, salon) -> dict:
         "extendedProperties": {"private": {"salonAppointmentId": str(appointment.public_id)}},
         "reminders": {"useDefault": True},
     }
-    if appointment.customer_email:
+    if allow_attendees and appointment.customer_email:
         body["attendees"] = [
             {"email": appointment.customer_email, "displayName": appointment.customer_name}
         ]
@@ -288,34 +381,49 @@ def push_appointment(appointment, notify_attendees: bool = False) -> str:
 
     salon = SalonSettings.load()
     service = build_service(calendar.credential)
-    body = _event_body(appointment, salon)
-    send_updates = "all" if notify_attendees else "none"
+    attendees_allowed = can_invite_attendees(calendar.credential)
+    body = _event_body(appointment, salon, allow_attendees=attendees_allowed)
+    send_updates = "all" if (notify_attendees and attendees_allowed) else "none"
 
-    try:
+    def _write(event_body, updates):
         if appointment.google_event_id:
-            event = (
+            return (
                 service.events()
                 .update(
                     calendarId=calendar.google_calendar_id,
                     eventId=appointment.google_event_id,
-                    body=body,
-                    sendUpdates=send_updates,
+                    body=event_body,
+                    sendUpdates=updates,
                 )
                 .execute()
             )
-        else:
-            event = (
-                service.events()
-                .insert(
-                    calendarId=calendar.google_calendar_id,
-                    body=body,
-                    sendUpdates=send_updates,
-                )
-                .execute()
-            )
+        return (
+            service.events()
+            .insert(calendarId=calendar.google_calendar_id, body=event_body, sendUpdates=updates)
+            .execute()
+        )
+
+    try:
+        event = _write(body, send_updates)
     except Exception as exc:  # noqa: BLE001
-        raise _wrap(exc) from exc
+        # Belt and braces: if Google still objects to the attendee list (for
+        # instance delegation was configured but has since been revoked), write
+        # the event without it rather than losing the booking entirely.
+        if attendees_allowed and _is_attendee_refusal(exc):
+            logger.warning(
+                "Calendar %s may not invite attendees; retrying without them.", calendar.pk
+            )
+            event = _write(_event_body(appointment, salon, allow_attendees=False), "none")
+        else:
+            raise _wrap(exc) from exc
     return event.get("id", "")
+
+
+def _is_attendee_refusal(exc: Exception) -> bool:
+    text = str(exc)
+    if "forbiddenForServiceAccounts" in text:
+        return True
+    return "attendees" in text and "Service accounts cannot invite attendees" in text
 
 
 def delete_appointment_event(appointment, notify_attendees: bool = False) -> None:

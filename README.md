@@ -17,9 +17,10 @@ written straight into their Google Calendar.
 - Pick a service, a day, then a time. Only genuinely free times are shown.
 - Booking confirmation by email, with a self-service cancellation link.
 
-**For the salon owner (in `/admin/`)**
+**For the salon owner (in `/admin/` and `/manage/google/`)**
+- Link a Google account from the admin panel with a Client ID and Client Secret.
+- Pick which of that account's calendars go on the homepage, and name each one.
 - Add and remove calendars, each with its own name, photo, colour and blurb.
-- Attach Google credentials and test the connection with one click.
 - Set business days and hours, salon-wide or per calendar, with lunch breaks.
 - Mark vacation and one-off closures, salon-wide or for one stylist.
 - Approve or decline requests, and re-sync anything Google missed.
@@ -62,74 +63,91 @@ SMTP. Copy `.env.example` to `.env` when you are ready to configure it properly.
 
 ---
 
-## Connecting a Google Calendar
+## Connecting Google Calendar
 
-The recommended route is a **service account** — no browser round-trip, nothing
-expires, and it works unattended on PythonAnywhere.
+Everything happens on one page: **`/manage/google/`** (also linked as *Google* in
+the header and from the dashboard). A superuser pastes a Client ID and Client
+Secret, links a Google account through the browser, and then picks which of that
+account's calendars appear on the homepage.
 
-### 1. Create the credential in Google Cloud
+### 1. Create the OAuth client in Google Cloud
 
 1. <https://console.cloud.google.com/> → create a project.
 2. **APIs & Services → Library** → enable **Google Calendar API**.
-3. **APIs & Services → Credentials → Create credentials → Service account.**
-4. Open the new service account → **Keys → Add key → Create new key → JSON**.
-   A `.json` file downloads.
+3. **OAuth consent screen** → External → add your own address under
+   **Test users** while the app is still unpublished.
+4. **Credentials → Create credentials → OAuth client ID → Web application.**
+5. Under **Authorised redirect URIs**, add exactly:
 
-### 2. Store it in the salon admin
+   ```
+   https://yourname.pythonanywhere.com/manage/google/callback/
+   ```
 
-*Admin → Google credentials → Add.* Give it a name, leave the type as
-**Service account**, paste the whole JSON file into the field, and save.
+   The Google setup page displays this URI with a **Copy** button — use that
+   rather than typing it. It must match character for character, including the
+   scheme and the trailing slash, or Google returns `redirect_uri_mismatch`.
 
-The page now shows a **Share calendars with** address, something like
-`salon-bot@your-project.iam.gserviceaccount.com`.
+6. Copy the **Client ID** and **Client Secret**.
 
-### 3. Share each calendar with it
+### 2. Save them in the admin
 
-In Google Calendar → hover the calendar → **⋮ → Settings and sharing**:
+Open **`/manage/google/`** → *1. Google Client ID & Secret* → paste both → **Save
+client**.
 
-- Under **Share with specific people**, add that address with the permission
-  **Make changes to events**.
-- Under **Integrate calendar**, copy the **Calendar ID**.
+The secret is encrypted at rest (Fernet, keyed off `SECRET_KEY`) and is never
+displayed again — leave the box blank when re-saving to keep the stored one.
+`.env` values (`GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`) act as a
+fallback; the database wins as soon as a Client ID is entered, and the two are
+never mixed.
 
-### 4. Create the calendar in the salon admin
+### 3. Link the Google account
 
-*Admin → Calendars → Add:*
+Click **Connect a Google account**. Google's consent screen appears, you sign in
+and approve, and you land back on the setup page showing the connected address.
 
-| Field | What to put in it |
-| --- | --- |
-| **Name** | What customers see, e.g. *Maria – Colour & Cuts* |
-| **Google calendar ID** | The ID you copied (or `primary`, or an email address) |
-| **Owner email** | The Google account that receives accept / decline emails |
-| **Credential** | The credential from step 2 |
+That grants this app **full read and write access** to that account's calendars.
+The refresh token is stored encrypted; nothing is written into your Google
+account, and no calendar sharing is involved.
 
-Save, then select the calendar in the list and run the action **Test connection
-to this calendar**. A green message means you are done — it now appears on the
-homepage.
+To hand over to a different account later, use **Reconnect / switch account**.
+**Disconnect** forgets the tokens (optionally revoking them at Google too) while
+leaving your calendars and bookings intact.
 
-From a console you can check everything at once:
+### 4. Add calendars to the homepage
 
-```bash
-python manage.py check_google
-```
+Section 3 of the page lists every calendar in the connected account. For each one
+you want to offer, type the name customers should see — it does not have to match
+the Google name — set the address that should receive the accept / decline
+emails, and click **Add**.
 
-### Alternative: OAuth instead of a service account
+It immediately becomes a card on the homepage. Opening hours, a photo, a colour
+and a description can be set afterwards in *Admin → Calendars*.
 
-If a stylist would rather connect their personal Gmail calendar than share it,
-create a **Desktop app** OAuth client in Google Cloud, download the client
-secrets, and run this **on a machine with a browser**:
+Calendars the account can only read are shown but cannot be added: this app has
+to be able to write bookings into them.
 
-```bash
-python manage.py connect_google --name "Maria's Google" --client-secrets client_secret.json
-```
+### Alternative: service account
 
-It stores the refresh token as a credential, and prints it so you can paste it
-into the same field on the server.
+The service-account route still works and needs no browser round-trip, which
+suits an unattended server. In *Admin → Google credentials*, paste a service
+account JSON key; then in *Admin → Calendars* add an entry with the **Calendar
+ID left empty** and run the action **Create a new Google calendar**. The service
+account creates and owns the calendar, then shares it out to the owner email.
 
-> A plain **API key** cannot create events or read a private calendar; Google
-> only accepts it for public, read-only access. There is a field for one, but
-> use a service account for anything real.
+Two things to know about that route:
 
----
+- A service account cannot add the customer as a Google **attendee** (Google
+  reserves that for real users and Workspace domain-wide delegation). The app
+  detects this and puts the customer's details in the event description instead.
+  The OAuth route above *can* invite attendees.
+- To point at a calendar that already exists, you must share it with the service
+  account address manually and paste its Calendar ID.
+
+### What about a plain API key?
+
+It cannot run this app. Google accepts API keys only for *public, read-only*
+calendar data — never for creating events or reading a private calendar,
+whatever scopes are requested. Use the OAuth client above.
 
 ## How availability is calculated
 
@@ -155,11 +173,13 @@ booking/models.py              salon settings, credentials, calendars,
                                services, hours, time off, appointments
 booking/availability.py        slot generation and the authoritative re-check
 booking/google_calendar.py     Google Calendar API wrapper (fails soft)
+booking/google_oauth.py        browser OAuth: link a Google account from admin
+hairsaloon/crypto.py           Fernet encryption for tokens and secrets
 booking/notifications.py       transactional email
-booking/services.py            create / confirm / decline / cancel
+booking/services.py            create / confirm / decline / cancel, provisioning
 booking/admin.py               the owner's control panel
 booking/views.py               public pages, JSON slot API, staff dashboard
-booking/tests.py               42 tests, no network access needed
+booking/tests.py               65 tests, no network access needed
 ```
 
 ## Tests
@@ -170,8 +190,12 @@ python manage.py test booking
 
 Covers slot generation, breaks, buffers, vacation, per-calendar overrides,
 double booking, the honeypot, the signed accept/decline links (including that a
-mail client prefetching a link cannot accept a booking), and the Google sync
-paths with a stubbed API client.
+mail client prefetching a link cannot accept a booking), calendar provisioning
+(and that a failed share does not lose the calendar just created), the
+attendee restriction on service accounts, the OAuth admin flow (PKCE, secret
+encryption, the env-vs-database fallback, reconnecting without a fresh refresh
+token, and the forced-HTTPS callback), and the Google sync paths with a stubbed
+API client.
 
 ## Deployment
 

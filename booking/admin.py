@@ -7,6 +7,8 @@ reservations.
 from __future__ import annotations
 
 from django.contrib import admin, messages
+from django.shortcuts import redirect
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
@@ -17,6 +19,7 @@ from .models import (
     BusinessHours,
     Calendar,
     GoogleCredential,
+    GoogleOAuthClientSettings,
     SalonSettings,
     Service,
     TimeOff,
@@ -65,6 +68,37 @@ class SalonSettingsAdmin(admin.ModelAdmin):
 
 
 # ---------------------------------------------------------------------------
+# Google OAuth client
+# ---------------------------------------------------------------------------
+@admin.register(GoogleOAuthClientSettings)
+class GoogleOAuthClientSettingsAdmin(admin.ModelAdmin):
+    """Read-only pointer: the real editing happens on the Google setup page."""
+
+    list_display = ("__str__", "updated_at")
+    readonly_fields = ("client_id", "secret_state", "updated_at", "go_to_setup")
+    fields = ("client_id", "secret_state", "updated_at", "go_to_setup")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Client secret")
+    def secret_state(self, obj):
+        return "Stored (encrypted)" if obj.has_secret else "Not set"
+
+    @admin.display(description="Where to change this")
+    def go_to_setup(self, obj):
+        return format_html(
+            '<a class="button" href="{}">Open Google setup</a>', reverse("booking:google_setup")
+        )
+
+    def changelist_view(self, request, extra_context=None):
+        return redirect(reverse("booking:google_setup"))
+
+
+# ---------------------------------------------------------------------------
 # Google credentials
 # ---------------------------------------------------------------------------
 @admin.register(GoogleCredential)
@@ -72,7 +106,13 @@ class GoogleCredentialAdmin(admin.ModelAdmin):
     list_display = ("name", "auth_type", "share_with", "is_active", "calendar_count", "last_checked_at")
     list_filter = ("auth_type", "is_active")
     search_fields = ("name", "oauth_account_email")
-    readonly_fields = ("share_with", "last_checked_at", "last_check_result", "setup_help")
+    readonly_fields = (
+        "share_with",
+        "connection_state",
+        "last_checked_at",
+        "last_check_result",
+        "setup_help",
+    )
     actions = ["test_connection", "show_calendars"]
     fieldsets = (
         (None, {"fields": ("name", "auth_type", "is_active", "setup_help")}),
@@ -88,14 +128,14 @@ class GoogleCredentialAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "OAuth 2.0 (personal Google account)",
+            "OAuth 2.0 (connected Google account)",
             {
                 "classes": ("collapse",),
-                "fields": (
-                    "oauth_client_id",
-                    "oauth_client_secret",
-                    "oauth_refresh_token",
-                    "oauth_account_email",
+                "fields": ("oauth_account_email", "connection_state"),
+                "description": (
+                    "Connect and disconnect accounts on the "
+                    "<a href='/manage/google/'>Google setup</a> page. Tokens are stored "
+                    "encrypted and are never shown here."
                 ),
             },
         ),
@@ -114,6 +154,18 @@ class GoogleCredentialAdmin(admin.ModelAdmin):
     def calendar_count(self, obj):
         return obj.calendars.count()
 
+    @admin.display(description="Connection")
+    def connection_state(self, obj):
+        if not obj.pk or obj.auth_type != GoogleCredential.OAUTH:
+            return "-"
+        if obj.oauth_refresh_token:
+            return format_html(
+                'Connected{} since {} &middot; <a href="/manage/google/">manage</a>',
+                f" as {obj.oauth_account_email}" if obj.oauth_account_email else "",
+                obj.connected_at.strftime("%d %b %Y") if obj.connected_at else "?",
+            )
+        return format_html('Not connected &middot; <a href="/manage/google/">connect now</a>')
+
     @admin.display(description="How to set this up")
     def setup_help(self, obj):
         return mark_safe(
@@ -121,12 +173,17 @@ class GoogleCredentialAdmin(admin.ModelAdmin):
             "<li>Google Cloud console &rarr; create a project &rarr; enable the "
             "<b>Google Calendar API</b>.</li>"
             "<li>Credentials &rarr; <b>Create credentials</b> &rarr; <b>Service account</b> &rarr; "
-            "Keys &rarr; Add key &rarr; JSON. Paste the file below.</li>"
-            "<li>Save this page, copy the <b>Share calendars with</b> address.</li>"
-            "<li>In Google Calendar: Settings for the calendar &rarr; <b>Share with specific people</b> "
-            "&rarr; add that address with <b>Make changes to events</b>.</li>"
-            "<li>Copy the <b>Calendar ID</b> from the same settings page and create a Calendar here.</li>"
+            "Keys &rarr; Add key &rarr; JSON. Paste the file below and save.</li>"
+            "<li>Go to <b>Calendars</b>, add one with a name and an owner email, leave the "
+            "<b>Calendar ID</b> empty, and run the action "
+            "<b>Create a new Google calendar</b>.</li>"
             "</ol>"
+            "<p style='margin:.6em 0 0'>That is the whole setup: this credential creates and owns "
+            "the calendar, then shares it out to the owner, so nothing needs configuring inside "
+            "anyone's Google account.</p>"
+            "<p style='margin:.4em 0 0;color:#666'>To use a calendar that already exists instead, "
+            "share it with the <b>Share calendars with</b> address below "
+            "(<b>Make changes to events</b>) and paste its Calendar ID into the calendar.</p>"
         )
 
     @admin.action(description="Test connection to Google")
@@ -206,7 +263,14 @@ class CalendarAdmin(admin.ModelAdmin):
     search_fields = ("name", "owner_email", "google_calendar_id")
     prepopulated_fields = {"slug": ("name",)}
     inlines = [BusinessHoursInline, TimeOffInline]
-    actions = ["test_calendar", "activate", "deactivate", "resync_upcoming"]
+    actions = [
+        "provision_calendar",
+        "share_with_owner",
+        "test_calendar",
+        "activate",
+        "deactivate",
+        "resync_upcoming",
+    ]
     readonly_fields = ("last_sync_error", "share_hint")
     fieldsets = (
         ("Shown to customers", {"fields": ("name", "slug", "description", "photo", "colour", "sort_order")}),
@@ -247,13 +311,74 @@ class CalendarAdmin(admin.ModelAdmin):
 
     @admin.display(description="Reminder")
     def share_hint(self, obj):
+        if obj.pk and not obj.google_calendar_id:
+            return mark_safe(
+                "No calendar yet. Save, then pick this row in the list and run "
+                "<b>Create a new Google calendar</b> &mdash; it will be created and shared "
+                "with the owner email automatically."
+            )
         if obj.credential and obj.credential.service_account_email:
             return format_html(
-                "Share this Google Calendar with <code>{}</code> and give it "
+                "Using an existing calendar? Share it with <code>{}</code> and give it "
                 "<b>Make changes to events</b>.",
                 obj.credential.service_account_email,
             )
         return "Pick a credential above (and save) to see the address to share with."
+
+    @admin.action(description="Create a new Google calendar (no sharing needed)")
+    def provision_calendar(self, request, queryset):
+        for calendar in queryset:
+            try:
+                calendar_id = booking_services.provision_google_calendar(calendar)
+            except ValueError as exc:
+                self.message_user(request, str(exc), level=messages.WARNING)
+                continue
+            except Exception as exc:  # noqa: BLE001 - reported to the admin
+                self.message_user(request, f"{calendar.name}: {exc}", level=messages.ERROR)
+                continue
+
+            calendar.refresh_from_db()
+            if calendar.last_sync_error:
+                self.message_user(
+                    request,
+                    f"{calendar.name}: calendar created ({calendar_id}), but {calendar.last_sync_error}",
+                    level=messages.WARNING,
+                )
+            else:
+                self.message_user(
+                    request,
+                    format_html(
+                        "{}: created <code>{}</code> and shared it with {}. "
+                        "It will appear in their Google Calendar shortly.",
+                        calendar.name,
+                        calendar_id,
+                        calendar.owner_email or "nobody (no owner email set)",
+                    ),
+                    level=messages.SUCCESS,
+                )
+
+    @admin.action(description="Re-send the calendar invitation to the owner")
+    def share_with_owner(self, request, queryset):
+        for calendar in queryset:
+            if not (calendar.is_google_connected and calendar.owner_email):
+                self.message_user(
+                    request,
+                    f"{calendar.name}: needs a credential, a calendar ID and an owner email.",
+                    level=messages.WARNING,
+                )
+                continue
+            try:
+                google_calendar.grant_calendar_access(
+                    calendar.credential, calendar.google_calendar_id, calendar.owner_email
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.message_user(request, f"{calendar.name}: {exc}", level=messages.ERROR)
+                continue
+            self.message_user(
+                request,
+                f"{calendar.name}: shared with {calendar.owner_email}.",
+                level=messages.SUCCESS,
+            )
 
     @admin.action(description="Test connection to this calendar")
     def test_calendar(self, request, queryset):

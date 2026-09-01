@@ -131,15 +131,33 @@ DEFAULT_FROM_EMAIL=Your Salon <salon@gmail.com>
 
 ## 7. Connect Google Calendar
 
-Follow **Connecting a Google Calendar** in [README.md](README.md), then confirm
-it from a Bash console:
+Log in and open **`https://yourname.pythonanywhere.com/manage/google/`**, then
+follow **Connecting Google Calendar** in [README.md](README.md): paste the Client
+ID and Client Secret, connect the Google account, and add the calendars you want
+on the homepage.
+
+The one thing that must match exactly is the **Authorised redirect URI** on the
+OAuth client in the Google Cloud console:
+
+```
+https://yourname.pythonanywhere.com/manage/google/callback/
+```
+
+The setup page shows the exact URI with a **Copy** button — use it. Note that
+PythonAnywhere terminates HTTPS at its proxy and forwards plain HTTP internally,
+so Django can build `http://` URLs; the app forces `https://` on the callback for
+exactly this reason. If you still get `redirect_uri_mismatch`, the URI registered
+at Google differs from the one displayed on that page.
+
+While the OAuth consent screen is unpublished, add every address you will connect
+under **Test users**, or Google returns `access_denied`.
+
+Nothing has to be uploaded to the server — the credentials are entered in the
+browser and stored encrypted in the database. To verify from a console:
 
 ```bash
 cd ~/hair-saloon && python3.11 manage.py check_google
 ```
-
-Nothing has to be uploaded to the server for this — the service-account JSON is
-pasted into the admin and lives in the database.
 
 ---
 
@@ -169,6 +187,17 @@ Then **Reload** on the Web tab.
 - **Site unstyled** → re-run `collectstatic` and check the static mapping.
 - **Accept / decline links point at 127.0.0.1** → `SITE_BASE_URL` is wrong.
   Existing links stay broken; fix it and re-send by re-saving the appointment.
+- **`redirect_uri_mismatch` when connecting Google** → the URI registered on the
+  OAuth client must equal the one shown on `/manage/google/`, character for
+  character (scheme, host, trailing slash).
+- **`access_denied` on the consent screen** → add that Google address under
+  **Test users** on the OAuth consent screen, or publish the app.
+- **"Google did not return a refresh token"** → the account already granted
+  access. Remove the app at <https://myaccount.google.com/permissions> and
+  connect again.
+- **Google connection dies after changing `DJANGO_SECRET_KEY`** → the stored
+  tokens are encrypted with a key derived from it. Reconnect the account on
+  `/manage/google/`.
 - **`Google API error 404`** → the calendar ID is wrong, or the calendar has not
   been shared with the service-account address.
 - **`Google API error 403`** → shared, but without *Make changes to events*.

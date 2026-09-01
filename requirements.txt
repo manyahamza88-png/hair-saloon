@@ -2,6 +2,7 @@
 Django>=5.0,<6.2
 whitenoise>=6.6            # serves static files without extra web-server config
 Pillow>=10.0               # calendar photos (ImageField)
+cryptography>=42.0         # encrypts OAuth tokens and the client secret at rest
 
 # Google Calendar integration
 google-api-python-client>=2.120

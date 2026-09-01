@@ -99,3 +99,55 @@ def cancel_appointment(appointment: Appointment, note: str = "", by_customer: bo
 
 def resync_appointment(appointment: Appointment) -> bool:
     return google_calendar.sync_appointment(appointment, notify_attendees=False)
+
+
+def provision_google_calendar(calendar, share_role: str = "writer", notify: bool = True) -> str:
+    """Create a Google calendar for this entry and hand the owner access.
+
+    The credential creates the calendar, so it owns it outright and no sharing
+    has to be arranged from inside anyone's Google account. The owner's address
+    is then granted access through the API, which makes the calendar appear in
+    their Google Calendar by itself.
+
+    Raises ``ValueError`` for a misconfigured entry and
+    ``google_calendar.GoogleError`` if Google refuses.
+    """
+    from .models import Calendar, SalonSettings
+
+    if calendar.google_calendar_id:
+        raise ValueError(
+            f"'{calendar.name}' already points at {calendar.google_calendar_id}. "
+            "Clear the calendar ID first if you really want a new one."
+        )
+    if not calendar.credential or not calendar.credential.is_active:
+        raise ValueError(f"'{calendar.name}' has no active Google credential attached.")
+
+    salon = SalonSettings.load()
+    calendar_id = google_calendar.create_calendar(
+        calendar.credential,
+        name=f"{salon.name} - {calendar.name}",
+        timezone_name=salon.timezone_name,
+        description=calendar.description or f"Online bookings for {calendar.name}.",
+    )
+
+    calendar.google_calendar_id = calendar_id
+    calendar.last_sync_error = ""
+    Calendar.objects.filter(pk=calendar.pk).update(
+        google_calendar_id=calendar_id, last_sync_error=""
+    )
+
+    # Sharing it with the owner is a nicety, not the point: the booking system
+    # already works without it. Do not lose the calendar we just made if this
+    # second step fails.
+    if calendar.owner_email:
+        try:
+            google_calendar.grant_calendar_access(
+                calendar.credential, calendar_id, calendar.owner_email, role=share_role, notify=notify
+            )
+        except Exception as exc:  # noqa: BLE001 - recorded, not raised
+            logger.warning("Could not share calendar %s with the owner: %s", calendar.pk, exc)
+            message = f"Calendar created, but sharing it with {calendar.owner_email} failed: {exc}"
+            calendar.last_sync_error = message
+            Calendar.objects.filter(pk=calendar.pk).update(last_sync_error=message[:2000])
+
+    return calendar_id

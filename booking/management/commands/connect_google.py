@@ -66,17 +66,16 @@ class Command(BaseCommand):
         except Exception:  # noqa: BLE001 - purely informational
             pass
 
-        credential, created = GoogleCredential.objects.update_or_create(
-            name=options["name"],
-            defaults={
-                "auth_type": GoogleCredential.OAUTH,
-                "oauth_client_id": section.get("client_id", ""),
-                "oauth_client_secret": section.get("client_secret", ""),
-                "oauth_refresh_token": creds.refresh_token,
-                "oauth_account_email": account_email,
-                "is_active": True,
-            },
+        credential, created = GoogleCredential.objects.get_or_create(
+            name=options["name"], defaults={"auth_type": GoogleCredential.OAUTH}
         )
+        credential.auth_type = GoogleCredential.OAUTH
+        credential.oauth_client_id = section.get("client_id", "")
+        credential.set_oauth_client_secret(section.get("client_secret", ""))
+        credential.set_refresh_token(creds.refresh_token)
+        credential.oauth_account_email = account_email
+        credential.is_active = True
+        credential.save()
         verb = "Created" if created else "Updated"
         self.stdout.write(self.style.SUCCESS(f"{verb} credential '{credential.name}'."))
         if account_email:
