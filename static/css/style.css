@@ -15,6 +15,11 @@
 
 * { box-sizing: border-box; }
 
+/* The browser's own [hidden] rule is a user-agent default, so ANY author rule
+   setting `display` beats it -- .chat-panel{display:flex} was enough to leave
+   the chat window open on page load. Make `hidden` mean hidden, always. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--paper);

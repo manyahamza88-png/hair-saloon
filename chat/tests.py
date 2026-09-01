@@ -578,3 +578,66 @@ class TemplateHygieneTests(TestCase):
         page = self.client.get("/").content.decode()
         for marker in ["{#", "#}", "{%", "%}", "{{", "}}"]:
             self.assertNotIn(marker, page, f"unrendered template syntax {marker!r} on the page")
+
+
+class HiddenAttributeTests(TestCase):
+    """`hidden` must actually hide, or the chat window opens by itself."""
+
+    def stylesheet(self):
+        from pathlib import Path
+
+        from django.conf import settings as django_settings
+
+        return (Path(django_settings.BASE_DIR) / "static" / "css" / "style.css").read_text(
+            encoding="utf-8"
+        )
+
+    def test_stylesheet_forces_hidden_elements_to_stay_hidden(self):
+        """A class setting `display` outbeats the browser's [hidden] default.
+
+        .chat-panel{display:flex} once left the chat window open on every page
+        load, so the guard below is load-bearing, not decoration.
+        """
+        css = self.stylesheet()
+        self.assertRegex(
+            css.replace("\n", " "),
+            r"\[hidden\]\s*\{\s*display:\s*none\s*!important",
+            "style.css must force [hidden] to display:none !important",
+        )
+
+    def test_the_chat_panel_starts_closed_in_the_markup(self):
+        page = self.client.get("/").content.decode()
+        panel = page[page.index('id="chat-panel"'):]
+        opening_tag = panel[: panel.index(">")]
+        self.assertIn("hidden", opening_tag, "the chat panel must render closed")
+
+    def test_no_element_relies_on_a_display_rule_to_be_hidden(self):
+        """Any class that sets display AND is toggled with `hidden` needs the guard."""
+        import re
+        from pathlib import Path
+
+        from django.conf import settings as django_settings
+
+        css = self.stylesheet()
+        with_display = {
+            m.group(1)
+            for m in re.finditer(r"\.([a-zA-Z0-9_-]+)\s*\{[^}]*?\bdisplay\s*:", css, re.S)
+        }
+        clashes = []
+        for path in Path(django_settings.BASE_DIR).rglob("*.html"):
+            if "staticfiles" in str(path):
+                continue
+            for tag in re.finditer(
+                r"<[a-z]+[^>]*\bhidden\b[^>]*>", path.read_text(encoding="utf-8")
+            ):
+                classes = re.search(r'class="([^"]*)"', tag.group(0))
+                if classes:
+                    clashes += [c for c in classes.group(1).split() if c in with_display]
+
+        if clashes:
+            # Not a failure in itself: it is only safe because of the guard.
+            self.assertRegex(
+                css.replace("\n", " "),
+                r"\[hidden\]\s*\{\s*display:\s*none\s*!important",
+                f"these classes set display and are toggled with hidden: {sorted(set(clashes))}",
+            )

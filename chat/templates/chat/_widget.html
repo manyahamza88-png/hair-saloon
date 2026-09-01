@@ -5,8 +5,9 @@ Floating live-chat bubble, included from base.html on every customer page.
 The bubble's initial visibility is decided on the server, so it does not depend
 on chat.js loading; JavaScript then keeps it in step as things change.
 
-Note: {# #} comments must fit on one line in Django. A multi-line one is not
-parsed as a comment at all and leaks onto the page, so use {% comment %} here.
+Note: Django's hash-style comments must fit on a single line. One spanning two
+lines is not treated as a comment at all and gets printed onto the page, which
+is why this block is used instead.
 {% endcomment %}
 <noscript><style>#chat-widget{display:none !important}</style></noscript>
 <div id="chat-widget" class="chat-widget"{% if not chat_visible %} hidden{% endif %}
