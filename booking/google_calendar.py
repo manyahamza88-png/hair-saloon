@@ -436,8 +436,25 @@ def _event_body(appointment, salon, allow_attendees: bool = False) -> dict:
     }.get(appointment.status, "")
     prefix = f"[{status_word}] " if status_word else ""
 
-    lines = [
-        f"Service: {appointment.service_name}",
+    from . import tokens
+
+    # Staff work from Google Calendar on a phone, not from this site's admin, so
+    # the event itself has to be actionable: the accept and decline links go in
+    # the description where the mobile app turns them into tappable links.
+    lines = []
+    if appointment.status == Appointment.PENDING:
+        lines += [
+            "*** NOT CONFIRMED YET — tap a link below ***",
+            "",
+            f"ACCEPT:  {tokens.decision_url(appointment, tokens.ACCEPT)}",
+            f"DECLINE: {tokens.decision_url(appointment, tokens.DECLINE)}",
+            "",
+            "Each opens a confirmation page first, so nothing changes by accident.",
+            "",
+        ]
+
+    lines += [
+        f"Service: {appointment.service_name} ({appointment.duration_minutes} min)",
         f"Customer: {appointment.customer_name}",
         f"Email: {appointment.customer_email}",
     ]
@@ -446,8 +463,11 @@ def _event_body(appointment, salon, allow_attendees: bool = False) -> dict:
     if appointment.notes:
         lines.append("")
         lines.append(f"Notes: {appointment.notes}")
+
     lines.append("")
-    lines.append(f"Manage this booking: {appointment_url(appointment)}")
+    if appointment.status == Appointment.CONFIRMED:
+        lines.append(f"Cancel this booking: {tokens.cancel_url(appointment)}")
+    lines.append(f"Booking details: {appointment_url(appointment)}")
 
     body = {
         "summary": f"{prefix}{appointment.service_name} - {appointment.customer_name}",
@@ -546,6 +566,67 @@ def delete_appointment_event(appointment, notify_attendees: bool = False) -> Non
         except ImportError:  # pragma: no cover
             pass
         raise _wrap(exc) from exc
+
+
+def fetch_event(calendar, event_id: str) -> dict | None:
+    """One event by id. ``None`` means it is gone from Google."""
+    service = build_service(calendar.credential, readonly=True)
+    try:
+        event = service.events().get(
+            calendarId=calendar.google_calendar_id, eventId=event_id
+        ).execute()
+    except Exception as exc:  # noqa: BLE001
+        try:
+            from googleapiclient.errors import HttpError
+
+            if isinstance(exc, HttpError) and getattr(exc.resp, "status", None) in (404, 410):
+                return None
+        except ImportError:  # pragma: no cover
+            pass
+        raise _wrap(exc) from exc
+
+    if event.get("status") == "cancelled":
+        return None
+    return event
+
+
+def read_back(appointment) -> dict:
+    """Compare Google against our record for one appointment.
+
+    Staff live in Google Calendar on their phones, so that is where an
+    appointment actually gets moved or dropped. Without reading those edits back
+    the slot stays blocked here for a booking that no longer exists.
+
+    Returns ``{"change": ...}`` where change is one of ``none``, ``deleted``,
+    ``moved`` or ``error``.
+    """
+    calendar = appointment.calendar
+    if not (calendar.is_google_connected and appointment.google_event_id):
+        return {"change": "none", "reason": "not synced"}
+
+    try:
+        event = fetch_event(calendar, appointment.google_event_id)
+    except Exception as exc:  # noqa: BLE001 - reported, never raised at a customer
+        return {"change": "error", "reason": str(exc)}
+
+    if event is None:
+        return {"change": "deleted"}
+
+    start_raw = event.get("start", {}).get("dateTime")
+    end_raw = event.get("end", {}).get("dateTime")
+    if not (start_raw and end_raw):
+        return {"change": "none", "reason": "all-day event, left alone"}
+
+    try:
+        new_start = dt.datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+        new_end = dt.datetime.fromisoformat(end_raw.replace("Z", "+00:00"))
+    except ValueError:
+        return {"change": "none", "reason": "unreadable times"}
+
+    if new_start != appointment.start_at or new_end != appointment.end_at:
+        return {"change": "moved", "start": new_start, "end": new_end}
+
+    return {"change": "none"}
 
 
 def sync_appointment(appointment, notify_attendees: bool = False) -> bool:

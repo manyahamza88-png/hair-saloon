@@ -487,7 +487,13 @@ class AppointmentAdmin(admin.ModelAdmin):
         "updated_at",
         "links",
     )
-    actions = ["accept_selected", "decline_selected", "cancel_selected", "resync_selected"]
+    actions = [
+        "accept_selected",
+        "decline_selected",
+        "cancel_selected",
+        "resync_selected",
+        "reconcile_selected",
+    ]
     fieldsets = (
         ("Booking", {"fields": ("calendar", "service", "start_at", "end_at", "status", "decision_note")}),
         ("Customer", {"fields": ("customer_name", "customer_email", "customer_phone", "notes")}),
@@ -556,6 +562,19 @@ class AppointmentAdmin(admin.ModelAdmin):
         for appointment in queryset:
             booking_services.cancel_appointment(appointment, by_customer=False)
         self.message_user(request, f"{queryset.count()} appointment(s) cancelled.")
+
+    @admin.action(description="Read back changes made in Google Calendar")
+    def reconcile_selected(self, request, queryset):
+        counts = {"none": 0, "deleted": 0, "moved": 0, "error": 0}
+        for appointment in queryset:
+            change = booking_services.reconcile_with_google(appointment)
+            counts[change] = counts.get(change, 0) + 1
+        self.message_user(
+            request,
+            f"{counts['deleted']} cancelled (deleted in Google), {counts['moved']} moved, "
+            f"{counts['none']} unchanged, {counts['error']} error(s).",
+            level=messages.WARNING if counts["error"] else messages.SUCCESS,
+        )
 
     @admin.action(description="Re-sync with Google Calendar")
     def resync_selected(self, request, queryset):

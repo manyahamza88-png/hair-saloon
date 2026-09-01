@@ -101,6 +101,50 @@ def resync_appointment(appointment: Appointment) -> bool:
     return google_calendar.sync_appointment(appointment, notify_attendees=False)
 
 
+def reconcile_with_google(appointment, notify: bool = True) -> str:
+    """Apply an edit a stylist made in Google Calendar back to the booking.
+
+    Returns what happened: ``none``, ``deleted``, ``moved`` or ``error``.
+    """
+    result = google_calendar.read_back(appointment)
+    change = result["change"]
+
+    if change == "deleted":
+        # The stylist removed it on their phone: free the slot and tell the
+        # customer, rather than leaving them expecting an appointment.
+        appointment.status = Appointment.CANCELLED
+        appointment.decided_at = timezone.now()
+        appointment.google_event_id = ""
+        appointment.decision_note = (
+            appointment.decision_note or "Cancelled from the salon's Google Calendar."
+        )
+        appointment.save(
+            update_fields=[
+                "status", "decided_at", "google_event_id", "decision_note", "updated_at",
+            ]
+        )
+        if notify:
+            notifications.notify_customer_cancelled(appointment)
+        logger.info("Appointment %s cancelled: its Google event was deleted.", appointment.pk)
+
+    elif change == "moved":
+        old_start = appointment.start_at
+        appointment.start_at = result["start"]
+        appointment.end_at = result["end"]
+        appointment.save(update_fields=["start_at", "end_at", "updated_at"])
+        if notify and appointment.status == Appointment.CONFIRMED:
+            notifications.notify_customer_confirmed(appointment)
+        logger.info(
+            "Appointment %s moved in Google: %s -> %s", appointment.pk, old_start, result["start"]
+        )
+
+    elif change == "error":
+        appointment.google_sync_error = result["reason"][:2000]
+        appointment.save(update_fields=["google_sync_error", "updated_at"])
+
+    return change
+
+
 def provision_google_calendar(calendar, share_role: str = "writer", notify: bool = True) -> str:
     """Create a Google calendar for this entry and hand the owner access.
 

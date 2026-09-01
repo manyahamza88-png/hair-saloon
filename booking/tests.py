@@ -1025,3 +1025,107 @@ class GmailBackendTests(BaseSalonTest):
 
         appointment.refresh_from_db()
         self.assertEqual(appointment.status, Appointment.PENDING)
+
+
+class GoogleReadBackTests(BaseSalonTest):
+    """Staff edit appointments in Google on their phone; we must notice."""
+
+    def setUp(self):
+        super().setUp()
+        self.credential = GoogleCredential.objects.create(
+            name="Connected Google account",
+            auth_type=GoogleCredential.OAUTH,
+            oauth_account_email="salon@gmail.com",
+            oauth_scopes='["https://www.googleapis.com/auth/calendar"]',
+        )
+        self.credential.set_refresh_token("r")
+        self.credential.save()
+        self.calendar.credential = self.credential
+        self.calendar.save()
+
+        with mock.patch("booking.google_calendar.push_appointment", return_value="evt-1"):
+            self.appointment = self.make_appointment()
+        self.appointment.refresh_from_db()
+
+    def test_event_deleted_in_google_cancels_the_booking(self):
+        from booking.services import reconcile_with_google
+
+        mail.outbox.clear()
+        with mock.patch("booking.google_calendar.fetch_event", return_value=None):
+            change = reconcile_with_google(self.appointment)
+
+        self.assertEqual(change, "deleted")
+        self.appointment.refresh_from_db()
+        self.assertEqual(self.appointment.status, Appointment.CANCELLED)
+        # ...and the customer is told, rather than turning up to nothing.
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("ana@example.com", mail.outbox[0].to)
+
+        # The slot is free again for somebody else.
+        labels = [s.label for s in availability.day_slots(self.calendar, next_weekday(0))]
+        self.assertIn("10:00", labels)
+
+    def test_event_moved_in_google_moves_the_booking(self):
+        from booking.services import reconcile_with_google
+
+        new_start = self.appointment.start_at + dt.timedelta(hours=2)
+        new_end = self.appointment.end_at + dt.timedelta(hours=2)
+        event = {
+            "start": {"dateTime": new_start.isoformat()},
+            "end": {"dateTime": new_end.isoformat()},
+        }
+        with mock.patch("booking.google_calendar.fetch_event", return_value=event):
+            change = reconcile_with_google(self.appointment, notify=False)
+
+        self.assertEqual(change, "moved")
+        self.appointment.refresh_from_db()
+        self.assertEqual(self.appointment.start_at, new_start)
+        self.assertEqual(self.appointment.end_at, new_end)
+
+    def test_an_unchanged_event_is_left_alone(self):
+        from booking.services import reconcile_with_google
+
+        event = {
+            "start": {"dateTime": self.appointment.start_at.isoformat()},
+            "end": {"dateTime": self.appointment.end_at.isoformat()},
+        }
+        with mock.patch("booking.google_calendar.fetch_event", return_value=event):
+            change = reconcile_with_google(self.appointment)
+        self.assertEqual(change, "none")
+        self.appointment.refresh_from_db()
+        self.assertEqual(self.appointment.status, Appointment.PENDING)
+
+    def test_a_google_outage_does_not_cancel_anything(self):
+        """An API error must never be read as 'the stylist deleted it'."""
+        from booking.services import reconcile_with_google
+
+        with mock.patch(
+            "booking.google_calendar.fetch_event", side_effect=RuntimeError("500 backend error")
+        ):
+            change = reconcile_with_google(self.appointment)
+
+        self.assertEqual(change, "error")
+        self.appointment.refresh_from_db()
+        self.assertEqual(self.appointment.status, Appointment.PENDING)  # untouched
+        self.assertIn("500 backend error", self.appointment.google_sync_error)
+
+    def test_pending_events_carry_tappable_accept_and_decline_links(self):
+        """Staff act from the Google event on their phone, not from the admin."""
+        from booking.google_calendar import _event_body
+
+        body = _event_body(self.appointment, self.salon)
+        description = body["description"]
+        self.assertIn(tokens.decision_url(self.appointment, tokens.ACCEPT), description)
+        self.assertIn(tokens.decision_url(self.appointment, tokens.DECLINE), description)
+        self.assertIn("NOT CONFIRMED YET", description)
+        self.assertTrue(body["summary"].startswith("[REQUEST]"))
+        self.assertEqual(body["status"], "tentative")
+
+    def test_confirmed_events_swap_the_links_for_a_cancel_link(self):
+        from booking.google_calendar import _event_body
+
+        self.appointment.status = Appointment.CONFIRMED
+        body = _event_body(self.appointment, self.salon)
+        self.assertNotIn("ACCEPT:", body["description"])
+        self.assertIn(tokens.cancel_url(self.appointment), body["description"])
+        self.assertEqual(body["status"], "confirmed")
