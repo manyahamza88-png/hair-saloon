@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 
+from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
 from django.db.models import Count, Max, Prefetch
 from django.http import JsonResponse
@@ -255,12 +256,24 @@ def desk(request):
         .annotate(message_count=Count("messages"))
         .order_by("-updated_at")[:20]
     )
+    # A missing collected chat.js is invisible to the customer and to us: the
+    # bubble simply never works. Say so here rather than leaving it a mystery.
+    static_missing = False
+    if not settings.DEBUG:
+        try:
+            from django.contrib.staticfiles.storage import staticfiles_storage
+
+            static_missing = not staticfiles_storage.exists("js/chat.js")
+        except Exception:  # noqa: BLE001 - a diagnostic must not break the page
+            static_missing = False
+
     return render(
         request,
         "chat/desk.html",
         {
             "chat_settings": chat_settings,
             "availability": availability,
+            "static_missing": static_missing,
             "waiting": waiting,
             "live": live,
             "recent": recent,

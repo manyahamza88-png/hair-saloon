@@ -498,3 +498,57 @@ class EscapingTests(ChatTestCase):
         conversation = Conversation.objects.get()
         self.client.post(reverse("chat:send"), {"text": "x" * 5000})
         self.assertEqual(len(conversation.messages.filter(sender_type=Message.CUSTOMER).last().text), 2000)
+
+
+class WidgetVisibilityTests(ChatTestCase):
+    """The bubble must be in the page without JavaScript having to reveal it."""
+
+    def test_bubble_is_visible_in_the_html_when_chat_is_available(self):
+        response = self.client.get("/")
+        page = response.content.decode()
+        self.assertIn('id="chat-widget"', page)
+        # No hidden attribute on the widget div: it renders straight away.
+        self.assertNotIn('class="chat-widget" hidden', page)
+
+    def test_bubble_is_hidden_in_the_html_when_chat_is_off(self):
+        self.settings_row.enabled = False
+        self.settings_row.save()
+        page = self.client.get("/").content.decode()
+        self.assertIn('class="chat-widget" hidden', page)
+
+    def test_bubble_shows_when_offline_if_configured(self):
+        self.settings_row.enabled = False
+        self.settings_row.show_when_offline = True
+        self.settings_row.save()
+        page = self.client.get("/").content.decode()
+        self.assertNotIn('class="chat-widget" hidden', page)
+
+    def test_bubble_is_hidden_outside_business_hours(self):
+        self.settings_row.follow_business_hours = True
+        self.settings_row.save()
+        # Hours must exist, or the "not configured yet" fallback keeps chat on.
+        BusinessHours.objects.create(
+            calendar=None, weekday=0, opens_at=time(9, 0), closes_at=time(17, 0)
+        )
+        with mock.patch("chat.availability._is_open_at", return_value=False), \
+             mock.patch("chat.availability.next_opening", return_value=None):
+            page = self.client.get("/").content.decode()
+        self.assertIn('class="chat-widget" hidden', page)
+
+    def test_the_widget_appears_on_every_customer_page(self):
+        from booking.models import Calendar
+
+        calendar = Calendar.objects.create(name="Maria", owner_email="m@example.com")
+        for url in ["/", calendar.get_absolute_url()]:
+            self.assertIn('id="chat-widget"', self.client.get(url).content.decode(), url)
+
+    def test_javascript_is_referenced_and_collected(self):
+        page = self.client.get("/").content.decode()
+        self.assertIn("js/chat.js", page)
+        # The file the template points at must actually exist in the app.
+        from pathlib import Path
+
+        from django.conf import settings as django_settings
+
+        source = Path(django_settings.BASE_DIR) / "static" / "js" / "chat.js"
+        self.assertTrue(source.exists(), "static/js/chat.js is missing from the project")

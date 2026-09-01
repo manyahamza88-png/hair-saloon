@@ -37,6 +37,10 @@
     </form>
 
     <div class="small muted desk-switch-note">
+      {% if availability.available %}Customers can see the chat bubble right now.
+      {% elif chat_settings.show_when_offline %}Customers see the bubble with your offline message.
+      {% else %}<strong>The bubble is hidden from customers.</strong>{% endif %}
+      
       {% if chat_settings.enabled %}
         {% if chat_settings.follow_business_hours %}
           On during opening hours.
@@ -51,6 +55,15 @@
     </div>
   </div>
 </div>
+
+{% if static_missing %}
+  <div class="alert alert-error">
+    <strong>The chat script is not deployed.</strong> <code>js/chat.js</code> is missing from
+    the collected static files, so no customer will see the chat bubble however this page is
+    configured. Run <code>python manage.py collectstatic</code> on the server (or
+    <code>bash deploy.sh</code>) and reload the web app.
+  </div>
+{% endif %}
 
 {% if not chat_settings.enabled %}
   <div class="alert alert-warning">
