@@ -3,6 +3,9 @@
 Roughly fifteen minutes end to end. Replace `yourname` with your PythonAnywhere
 username everywhere below.
 
+This guide installs the dependencies directly into your account with
+`pip --user` — no virtualenv.
+
 ---
 
 ## 1. Get the code onto the server
@@ -15,20 +18,34 @@ git clone <your-repo-url> hair-saloon      # or upload a zip and unzip it
 cd hair-saloon
 ```
 
-## 2. Virtualenv and dependencies
+## 2. Dependencies
 
 ```bash
-mkvirtualenv --python=/usr/bin/python3.11 salon
-pip install -r requirements.txt
+pip3.11 install --user -r requirements.txt
 ```
 
-Remember the virtualenv name (`salon`) — the Web tab needs it.
+Three things to get right here:
+
+- **`--user` is required.** The system Python on PythonAnywhere is read-only, so
+  a plain `pip install` fails. `--user` puts everything in
+  `~/.local/lib/python3.11/site-packages`, which is on the path automatically.
+- **Use the versioned command** (`pip3.11`, not `pip`) and pick the *same*
+  version you select on the Web tab in step 5. Installing with `pip3.11` and
+  then running the web app on Python 3.10 is the classic way to get
+  `ModuleNotFoundError: No module named 'django'` on a site that works fine in
+  the console.
+- **PythonAnywhere preinstalls its own Django**, usually an older one. Your
+  `--user` install takes precedence over it, so this is fine — but if you ever
+  see the wrong version, check with `python3.11 -m django --version` rather than
+  trusting the console's `django-admin`.
+
+Everything below uses `python3.11` explicitly for the same reason.
 
 ## 3. Settings
 
 ```bash
 cp .env.example .env
-python -c "from django.core.management.utils import get_random_secret_key as k; print(k())"
+python3.11 -c "from django.core.management.utils import get_random_secret_key as k; print(k())"
 nano .env
 ```
 
@@ -49,25 +66,31 @@ wrong, those links break — it is the single most common deployment mistake her
 ## 4. Database and first data
 
 ```bash
-python manage.py migrate
-python manage.py init_salon --name "Your Salon" --timezone Europe/Berlin
-python manage.py createsuperuser
-python manage.py collectstatic --noinput
+python3.11 manage.py migrate
+python3.11 manage.py init_salon --name "Your Salon" --timezone Europe/Berlin
+python3.11 manage.py createsuperuser
+python3.11 manage.py collectstatic --noinput
 ```
 
 SQLite is fine for one salon. To use PythonAnywhere's MySQL instead, create the
-database on the *Databases* tab, `pip install mysqlclient`, fill in the `DB_*`
-lines in `.env`, and re-run `migrate`.
+database on the *Databases* tab, run
+`pip3.11 install --user mysqlclient`, fill in the `DB_*` lines in `.env`, and
+re-run `migrate`.
 
 ## 5. The Web tab
 
 *Web → Add a new web app → **Manual configuration** → Python 3.11.*
 
+Pick the **same version you installed with in step 2**.
+
 | Field | Value |
 | --- | --- |
 | Source code | `/home/yourname/hair-saloon` |
 | Working directory | `/home/yourname/hair-saloon` |
-| Virtualenv | `/home/yourname/.virtualenvs/salon` |
+| Virtualenv | *leave empty* |
+
+Leaving the Virtualenv box blank is what makes the web app fall back to the
+system Python plus your `--user` packages.
 
 **WSGI configuration file** — click the link and replace the whole file with the
 contents of `pythonanywhere_wsgi.py` from this repo, editing `USERNAME` and
@@ -112,7 +135,7 @@ Follow **Connecting a Google Calendar** in [README.md](README.md), then confirm
 it from a Bash console:
 
 ```bash
-workon salon && cd ~/hair-saloon && python manage.py check_google
+cd ~/hair-saloon && python3.11 manage.py check_google
 ```
 
 Nothing has to be uploaded to the server for this — the service-account JSON is
@@ -123,17 +146,22 @@ pasted into the admin and lives in the database.
 ## Updating later
 
 ```bash
-workon salon && cd ~/hair-saloon
+cd ~/hair-saloon
 git pull
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py collectstatic --noinput
+pip3.11 install --user -r requirements.txt
+python3.11 manage.py migrate
+python3.11 manage.py collectstatic --noinput
 ```
 
 Then **Reload** on the Web tab.
 
 ## When something breaks
 
+- **`ModuleNotFoundError: No module named 'django'` (or `googleapiclient`) in the
+  error log, but the console works** → the Web tab's Python version does not
+  match the `pip3.11` you installed with. Make them the same and reload.
+- **`error: externally-managed-environment` or a permissions error from pip** →
+  you left out `--user`.
 - **500 with `DEBUG=False`** → *Web → Error log*. Nine times out of ten it is
   `DJANGO_ALLOWED_HOSTS`.
 - **CSRF error on the booking form** → `DJANGO_CSRF_TRUSTED_ORIGINS` must include
