@@ -49,12 +49,15 @@
       <h4>2. Switch on the Calendar API</h4>
       <ol>
         <li>Left menu &rarr; <strong>APIs &amp; Services</strong> &rarr; <strong>Library</strong>.</li>
-        <li>Search for <strong>Google Calendar API</strong> and open it.</li>
-        <li>Click <strong>Enable</strong>.</li>
+        <li>Search for <strong>Google Calendar API</strong>, open it, click <strong>Enable</strong>.</li>
+        <li>Go back to the Library, search for <strong>Gmail API</strong> and enable that too.</li>
       </ol>
       <p class="small muted">
-        Enable only this one. The salon does not need Gmail, Drive or anything else,
-        and asking for less makes the consent screen simpler.
+        The Gmail API lets the salon's booking emails be sent from this account, so
+        there is no SMTP server or app password to set up &mdash; and it works on hosts
+        that block outbound SMTP. The permission requested is <code>gmail.send</code>,
+        which can only send mail; it cannot read the mailbox. Skip it if you would
+        rather configure your own SMTP server.
       </p>
 
       <h4>3. Fill in the consent screen</h4>
@@ -172,8 +175,30 @@
       <span>Account</span>
       <span><strong>{{ credential.oauth_account_email|default:"(unknown address)" }}</strong></span>
     </div>
-    <div class="summary-line"><span>Access</span><span>Full read &amp; write to this account's calendars</span></div>
+    <div class="summary-line"><span>Calendars</span><span>Full read &amp; write</span></div>
+    <div class="summary-line">
+      <span>Sending email</span>
+      <span>
+        {% if smtp_configured %}
+          <span class="badge badge-cancelled">using SMTP instead</span>
+        {% elif can_send_email %}
+          <span class="badge badge-confirmed">enabled</span>
+        {% else %}
+          <span class="badge badge-pending">not granted</span>
+        {% endif %}
+      </span>
+    </div>
     <div class="summary-line"><span>Connected</span><span>{{ credential.connected_at|date:"j M Y, H:i" }}</span></div>
+
+    {% if not can_send_email and not smtp_configured %}
+      <div class="alert alert-warning" style="margin-top:.8rem">
+        <strong>This connection cannot send email yet.</strong>
+        It was made before email sending was added, so it only carries calendar
+        permission. Click <em>Reconnect</em> below and approve the extra request &mdash;
+        booking confirmations and accept / decline emails will then be sent from
+        {{ credential.oauth_account_email|default:"this account" }}, with no SMTP password needed.
+      </div>
+    {% endif %}
 
     <div class="actions">
       <a class="btn btn-ghost" href="{% url 'booking:google_connect' %}">Reconnect / switch account</a>
@@ -189,7 +214,8 @@
   {% else %}
     <p class="small muted">
       You will be sent to Google to sign in and approve access. The account you pick
-      is the one whose calendars this site can read and write.
+      is the one whose calendars this site can read and write, and the one your
+      booking emails are sent from.
     </p>
     {% if client.is_configured or env_fallback %}
       <a class="btn" href="{% url 'booking:google_connect' %}">Connect a Google account</a>

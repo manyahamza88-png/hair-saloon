@@ -173,6 +173,13 @@ STORAGES = {
 # ---------------------------------------------------------------------------
 # Email
 # ---------------------------------------------------------------------------
+# By default the salon's booking emails go out through the Gmail API of the
+# Google account connected under /manage/google/ -- the same account already
+# used for the calendar. That means no SMTP password to manage, and it works on
+# hosts that block outbound SMTP (PythonAnywhere's free plan, for one).
+#
+# Setting EMAIL_HOST switches to ordinary SMTP instead, for salons that would
+# rather use their own mail provider.
 if env("EMAIL_HOST"):
     EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
     EMAIL_HOST = env("EMAIL_HOST")
@@ -183,8 +190,12 @@ if env("EMAIL_HOST"):
     EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
     EMAIL_TIMEOUT = int(env("EMAIL_TIMEOUT", "20"))
 else:
-    # Prints emails to the console: handy for local development.
-    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+    EMAIL_BACKEND = env("EMAIL_BACKEND", "booking.email_backend.GmailAPIBackend")
+
+# When no Google account is connected yet: print emails instead of sending them.
+# On by default in development so the whole booking flow can be walked through
+# offline; off in production so a broken connection is loud rather than silent.
+EMAIL_FALLBACK_TO_CONSOLE = env_bool("EMAIL_FALLBACK_TO_CONSOLE", DEBUG)
 
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "Hair Salon <no-reply@example.com>")
 SERVER_EMAIL = DEFAULT_FROM_EMAIL

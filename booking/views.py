@@ -16,6 +16,7 @@ from django.conf import settings as settings_module
 
 from . import (
     availability,
+    gmail,
     google_calendar,
     google_oauth,
     services as booking_services,
@@ -469,6 +470,10 @@ def google_setup(request):
             "client": client,
             "credential": credential,
             "connected": bool(credential and credential.is_connected),
+            "can_send_email": gmail.can_send_email(credential),
+            # Django always defines EMAIL_HOST ("localhost"), so the backend in
+            # use is the honest signal for whether SMTP is configured.
+            "smtp_configured": "smtp" in settings_module.EMAIL_BACKEND.lower(),
             "google_calendars": google_calendars,
             "listing_error": listing_error,
             "callback_url": google_oauth.callback_url(request),

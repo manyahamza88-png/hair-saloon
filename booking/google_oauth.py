@@ -18,7 +18,13 @@ import secrets
 from django.urls import reverse
 from django.utils import timezone
 
-from .google_calendar import SCOPES, GoogleError, GoogleNotConfigured, _wrap
+from .google_calendar import (
+    GMAIL_SEND_SCOPE,
+    OAUTH_SCOPES,
+    GoogleError,
+    GoogleNotConfigured,
+    _wrap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +74,7 @@ def _build_flow(request, client_id: str, client_secret: str, state: str | None =
 
     return Flow.from_client_config(
         _client_config(client_id, client_secret),
-        scopes=SCOPES,
+        scopes=OAUTH_SCOPES,
         state=state,
         redirect_uri=callback_url(request),
     )

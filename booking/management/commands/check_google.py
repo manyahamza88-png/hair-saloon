@@ -8,7 +8,7 @@ service-account key to see exactly what Google says.
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from booking import google_calendar
+from booking import gmail, google_calendar
 from booking.models import Calendar, GoogleCredential
 
 
@@ -42,6 +42,12 @@ class Command(BaseCommand):
             GoogleCredential.objects.filter(pk=credential.pk).update(
                 last_checked_at=timezone.now(), last_check_result=result
             )
+
+        self.stdout.write("\nSending email:")
+        try:
+            self.stdout.write(self.style.SUCCESS(f"  {gmail.check_sending()}"))
+        except Exception as exc:  # noqa: BLE001 - this command exists to report them
+            self.stderr.write(self.style.ERROR(f"  {exc}"))
 
         self.stdout.write("\nCalendars:")
         calendars = Calendar.objects.all()

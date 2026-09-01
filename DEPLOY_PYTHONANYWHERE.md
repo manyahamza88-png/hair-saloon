@@ -298,9 +298,31 @@ is almost always in step 4 or step 6. See the table at the end.
 
 ## 8. Email
 
-Set these in `.env` and reload. With Gmail you need an
-[App Password](https://myaccount.google.com/apppasswords) — your normal password
-will not work:
+**Nothing to configure.** Booking emails are sent through the Gmail API of the
+Google account you connect in step 9 — the same account used for the calendar.
+No SMTP host, no App Password.
+
+This also sidesteps the usual PythonAnywhere headache: free accounts cannot open
+outbound SMTP connections, but the Gmail API is an ordinary HTTPS call to
+`googleapis.com`, which has to work anyway or the calendar sync would fail too.
+So **email works on the free plan**.
+
+Set only this, for the display name on outgoing mail:
+
+```ini
+DEFAULT_FROM_EMAIL=Your Salon <ignored@example.com>
+```
+
+The address is always the connected Google account — Gmail rewrites it — so only
+the name in front matters.
+
+Until you connect an account, emails are printed to the server log rather than
+sent (`EMAIL_FALLBACK_TO_CONSOLE`, on in development, off in production).
+
+<details>
+<summary>Using your own SMTP server instead</summary>
+
+Set `EMAIL_HOST` and the app switches to SMTP entirely:
 
 ```ini
 EMAIL_HOST=smtp.gmail.com
@@ -311,11 +333,11 @@ EMAIL_HOST_PASSWORD=abcd efgh ijkl mnop
 DEFAULT_FROM_EMAIL=Your Salon <yoursalon@gmail.com>
 ```
 
-> **Free PythonAnywhere accounts cannot make outbound SMTP connections.** The
-> site works, but no email leaves the server, so nobody receives the accept /
-> decline links. Accept and decline from `/manage/` instead, which does exactly
-> the same thing. A paid account lifts the restriction. Leaving `EMAIL_HOST`
-> empty writes each email to the server log — a useful halfway house for testing.
+With Gmail over SMTP you need an
+[App Password](https://myaccount.google.com/apppasswords); your normal password
+will not work. On a free PythonAnywhere account this route silently sends
+nothing, because outbound SMTP is blocked.
+</details>
 
 ---
 
@@ -334,8 +356,10 @@ redirect URI with a Copy button. What follows is the same material for reference
 
 1. <https://console.cloud.google.com/> → sign in with the **salon's** Google
    account → project dropdown → **New project** → name it `Salon Booking`.
-2. **APIs & Services → Library** → search **Google Calendar API** → **Enable**.
-   Enable only that one. No credit card is needed.
+2. **APIs & Services → Library** → enable **Google Calendar API**, and also
+   **Gmail API** if you want the salon's booking emails sent from this account
+   (recommended — it removes the need for any SMTP password). No credit card is
+   needed.
 
 ### 9b. Consent screen
 
@@ -476,4 +500,5 @@ Always start with *Web → Error log*, newest lines at the bottom.
 | Everyone suddenly logged out | Same cause — `SECRET_KEY` changed |
 | Google connection stops working after 7 days | The consent screen is still in *Testing*. **Publish app** |
 | Bookings save but never reach Google | See *Google sync error* on the appointment in the admin, fix it, then **Re-sync** |
-| No emails at all | Free accounts block outbound SMTP; accept / decline from `/manage/` |
+| No emails at all | Check `manage.py check_google` — the connection may lack the email grant; reconnect at `/manage/google/` |
+| "This connection cannot send email yet" | Connected before email sending existed. Press **Reconnect** and approve the extra permission |

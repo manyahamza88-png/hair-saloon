@@ -681,6 +681,66 @@ class GoogleOAuthSetupTests(BaseSalonTest):
         self.assertContains(response, "Connect a Google account first")
         self.assertFalse(Calendar.objects.filter(google_calendar_id="a@x").exists())
 
+    # -- sending email through the connected account -----------------------
+    def test_connecting_asks_for_permission_to_send_email(self):
+        """The consent screen must request gmail.send, or there is no way to mail."""
+        from booking.models import GoogleOAuthClientSettings
+
+        client = GoogleOAuthClientSettings.load()
+        client.client_id = "123-abc.apps.googleusercontent.com"
+        client.set_client_secret("GOCSPX-x")
+        client.save()
+
+        response = self.client.get(reverse("booking:google_connect"))
+        self.assertIn("gmail.send", response["Location"])
+        self.assertIn("calendar", response["Location"])
+
+    def test_a_connection_without_the_grant_cannot_send(self):
+        from booking import gmail
+
+        creds = self._fake_creds()
+        creds.scopes = ["https://www.googleapis.com/auth/calendar"]  # calendar only
+        with mock.patch("booking.google_oauth.finish", return_value=creds), \
+             mock.patch("booking.google_oauth.account_email", return_value="salon@gmail.com"):
+            self.client.get(reverse("booking:google_callback"), {"code": "x"})
+
+        credential = GoogleCredential.objects.get(auth_type=GoogleCredential.OAUTH)
+        self.assertFalse(gmail.can_send_email(credential))
+        self.assertIsNone(gmail.sending_credential())
+
+        # ...and the page says so rather than failing at booking time.
+        page = self.client.get(reverse("booking:google_setup")).content.decode()
+        self.assertIn("cannot send email yet", page)
+
+    def test_a_full_connection_can_send(self):
+        from booking import gmail
+
+        creds = self._fake_creds()
+        creds.scopes = [
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/gmail.send",
+        ]
+        with mock.patch("booking.google_oauth.finish", return_value=creds), \
+             mock.patch("booking.google_oauth.account_email", return_value="salon@gmail.com"):
+            self.client.get(reverse("booking:google_callback"), {"code": "x"})
+
+        credential = GoogleCredential.objects.get(auth_type=GoogleCredential.OAUTH)
+        self.assertTrue(gmail.can_send_email(credential))
+        self.assertEqual(gmail.sending_credential(), credential)
+        self.assertIn("enabled", self.client.get(reverse("booking:google_setup")).content.decode())
+
+    def test_a_service_account_is_never_used_to_send(self):
+        """Service accounts cannot send as a human; they must not be picked up."""
+        from booking import gmail
+
+        service_account = GoogleCredential.objects.create(
+            name="SA", auth_type=GoogleCredential.SERVICE_ACCOUNT,
+            service_account_json='{"client_email":"a@b.iam.gserviceaccount.com",'
+                                 '"private_key":"x","token_uri":"y"}',
+        )
+        self.assertFalse(gmail.can_send_email(service_account))
+        self.assertIsNone(gmail.sending_credential())
+
     # -- on-page setup instructions ----------------------------------------
     def test_setup_page_carries_the_cloud_instructions(self):
         """The Google Cloud walkthrough lives on the page, not just in the docs."""
@@ -872,3 +932,96 @@ class GoogleIntegrationTests(BaseSalonTest):
         self.assertNotIn("12:30", labels)
         self.assertIn("13:00", labels)
         self.assertIn("09:00", labels)
+
+
+class GmailBackendTests(BaseSalonTest):
+    """The email backend that sends through the connected Google account."""
+
+    def setUp(self):
+        super().setUp()
+        self.credential = GoogleCredential.objects.create(
+            name="Connected Google account",
+            auth_type=GoogleCredential.OAUTH,
+            oauth_account_email="salon@gmail.com",
+            oauth_scopes='["https://www.googleapis.com/auth/calendar", '
+                         '"https://www.googleapis.com/auth/gmail.send"]',
+        )
+        self.credential.set_refresh_token("refresh-abc")
+        self.credential.save()
+
+    def test_booking_email_goes_through_gmail(self):
+        from django.core.mail import EmailMultiAlternatives
+
+        sent = []
+        with self.settings(EMAIL_BACKEND="booking.email_backend.GmailAPIBackend"):
+            with mock.patch("booking.gmail.send_message", side_effect=lambda m, credential=None: sent.append(m) or True):
+                message = EmailMultiAlternatives(
+                    "Booking request", "body", "Salon <no-reply@example.com>", ["ana@example.com"]
+                )
+                delivered = message.send()
+
+        self.assertEqual(delivered, 1)
+        self.assertEqual(sent[0].to, ["ana@example.com"])
+
+    def test_from_header_is_rewritten_to_the_connected_account(self):
+        """Gmail sends as the authenticated account, so the header must match."""
+        from django.core.mail import EmailMultiAlternatives
+
+        captured = {}
+
+        def fake_send(userId, body):
+            import base64, email
+            captured["mime"] = email.message_from_bytes(base64.urlsafe_b64decode(body["raw"]))
+            return mock.Mock(execute=lambda: {})
+
+        service = mock.Mock()
+        service.users.return_value.messages.return_value.send.side_effect = fake_send
+        with mock.patch("booking.gmail._service", return_value=service):
+            message = EmailMultiAlternatives(
+                "Hi", "body", "Studio Lumiere <no-reply@example.com>", ["ana@example.com"]
+            )
+            from booking import gmail as gmail_module
+            gmail_module.send_message(message, credential=self.credential)
+
+        from_header = str(captured["mime"]["From"])
+        self.assertIn("salon@gmail.com", from_header)
+        self.assertIn("Studio Lumiere", from_header)  # display name preserved
+
+    def test_without_a_connection_it_prints_in_debug(self):
+        from django.core.mail import EmailMultiAlternatives
+
+        GoogleCredential.objects.all().delete()
+        with self.settings(
+            EMAIL_BACKEND="booking.email_backend.GmailAPIBackend",
+            EMAIL_FALLBACK_TO_CONSOLE=True,
+        ):
+            delivered = EmailMultiAlternatives(
+                "Hi", "body", "a@b.com", ["ana@example.com"]
+            ).send()
+        self.assertEqual(delivered, 1)  # printed, not lost
+
+    def test_without_a_connection_it_reports_zero_in_production(self):
+        from django.core.mail import EmailMultiAlternatives
+
+        GoogleCredential.objects.all().delete()
+        with self.settings(
+            EMAIL_BACKEND="booking.email_backend.GmailAPIBackend",
+            EMAIL_FALLBACK_TO_CONSOLE=False,
+        ):
+            with self.assertLogs("booking.email_backend", level="ERROR"):
+                delivered = EmailMultiAlternatives(
+                    "Hi", "body", "a@b.com", ["ana@example.com"]
+                ).send()
+        self.assertEqual(delivered, 0)
+
+    def test_a_google_failure_does_not_lose_the_booking(self):
+        """Email is best effort: a send failure must not break create_appointment."""
+        with self.settings(EMAIL_BACKEND="booking.email_backend.GmailAPIBackend"):
+            with mock.patch(
+                "booking.gmail.send_message", side_effect=RuntimeError("Gmail is down")
+            ):
+                with self.assertLogs("booking.email_backend", level="ERROR"):
+                    appointment = self.make_appointment()
+
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.PENDING)

@@ -16,6 +16,7 @@ written straight into their Google Calendar.
 - Homepage lists every configured calendar with its next free slot.
 - Pick a service, a day, then a time. Only genuinely free times are shown.
 - Booking confirmation by email, with a self-service cancellation link.
+  Mail is sent through the connected Google account — no SMTP password needed.
 - Live chat bubble for quick questions, when the salon has it switched on.
 
 **For the salon owner (in `/admin/` and `/manage/google/`)**
@@ -82,7 +83,9 @@ account's calendars appear on the homepage.
 ### 1. Create the OAuth client in Google Cloud
 
 1. <https://console.cloud.google.com/> → create a project.
-2. **APIs & Services → Library** → enable **Google Calendar API**.
+2. **APIs & Services → Library** → enable **Google Calendar API**, and
+   **Gmail API** too if you want booking emails sent from this account (which
+   removes the need for any SMTP password).
 3. **OAuth consent screen** → External → add your own address under
    **Test users** while the app is still unpublished.
 4. **Credentials → Create credentials → OAuth client ID → Web application.**

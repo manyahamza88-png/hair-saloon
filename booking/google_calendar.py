@@ -17,8 +17,18 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
-READONLY_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar"
+CALENDAR_READONLY_SCOPE = "https://www.googleapis.com/auth/calendar.readonly"
+# Least privilege: gmail.send can only send, it cannot read the mailbox.
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+
+SCOPES = [CALENDAR_SCOPE]
+READONLY_SCOPES = [CALENDAR_READONLY_SCOPE]
+
+# What the browser flow asks a Google account to grant: calendar access, plus
+# permission to send the salon's booking emails from that account. Sending this
+# way needs no SMTP password and works on hosts that block outbound SMTP.
+OAUTH_SCOPES = [CALENDAR_SCOPE, GMAIL_SEND_SCOPE]
 
 
 class GoogleNotConfigured(Exception):
@@ -78,6 +88,9 @@ def _credentials_for(credential, readonly: bool = False):
         return creds
 
     if credential.auth_type == credential.OAUTH:
+        # An OAuth token may also carry the Gmail send grant; declare the full
+        # set so a refresh does not narrow it.
+        scopes = READONLY_SCOPES if readonly else OAUTH_SCOPES
         refresh_token = credential.get_refresh_token()
         if not refresh_token:
             raise GoogleNotConfigured(
