@@ -336,3 +336,68 @@ details.guide[open] > summary { border-bottom: 1px solid var(--line); }
 .guide-body table.hours-table td { vertical-align: top; padding: .4rem .5rem .4rem 0; }
 .guide-body table.hours-table td:first-child { white-space: nowrap; padding-right: .9rem; }
 .guide-body table.hours-table td:last-child { text-align: left; }
+
+/* ---------- staff week grid ---------- */
+.week-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.week-nav { display: flex; gap: .4rem; }
+.week-filter { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; padding: .7rem 1rem; margin-bottom: 1rem; }
+.week-chip { display: inline-flex; align-items: center; gap: .35rem; font-size: .86rem; cursor: pointer; }
+.week-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+.week-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow); }
+.week-grid { display: grid; grid-template-columns: 56px repeat(7, minmax(120px, 1fr)); min-width: 900px; }
+.week-gutter { border-right: 1px solid var(--line); }
+.week-col { border-right: 1px solid var(--line); position: relative; }
+.week-col:last-child { border-right: none; }
+.week-col.is-today { background: #fdfaf5; }
+.week-col.is-closed .week-track { background: repeating-linear-gradient(45deg, #faf7f3, #faf7f3 6px, #f3ede5 6px, #f3ede5 12px); }
+
+.week-dayhead {
+  height: 54px; padding: .45rem .5rem; border-bottom: 1px solid var(--line);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .1rem;
+  position: sticky; top: 0; background: var(--card); z-index: 3;
+}
+.week-col.is-today .week-dayhead { background: #fdf3e6; }
+.week-dayhead .dow { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); }
+.week-dayhead .dom { font-size: 1.15rem; font-weight: 700; line-height: 1; }
+.week-count { font-size: .68rem; background: var(--accent); color: #fff; border-radius: 999px; padding: 0 .4rem; }
+.week-closed-tag { font-size: .64rem; color: var(--ink-soft); text-align: center; }
+
+.week-track { position: relative; height: 720px; }
+.week-line { position: absolute; left: 0; right: 0; border-top: 1px solid #f0e9e0; pointer-events: none; }
+.week-hour-label { position: absolute; right: 6px; transform: translateY(-50%); font-size: .68rem; color: var(--ink-soft); }
+.week-now { position: absolute; left: 0; right: 0; border-top: 2px solid #dc2626; z-index: 4; pointer-events: none; }
+.week-now::before { content: ""; position: absolute; left: -3px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: #dc2626; }
+
+.week-entry {
+  position: absolute; left: 3px; right: 3px; min-height: 20px; overflow: hidden;
+  border-radius: 6px; padding: .2rem .35rem; z-index: 2;
+  background: var(--c, var(--accent)); color: #fff; text-decoration: none;
+  border-left: 3px solid rgba(0, 0, 0, .18); font-size: .74rem; line-height: 1.25;
+}
+.week-entry:hover { filter: brightness(1.07); z-index: 5; }
+.week-entry-time { font-weight: 700; margin-right: .25rem; }
+.week-entry-name { font-weight: 600; }
+.week-entry-sub { display: block; opacity: .85; font-size: .68rem; }
+.week-entry.is-pending {
+  background: repeating-linear-gradient(45deg, var(--c, var(--accent)), var(--c, var(--accent)) 5px, rgba(255,255,255,.28) 5px, rgba(255,255,255,.28) 10px);
+  border-left-color: #b45309;
+}
+.week-entry.is-external {
+  background: #eee9e2; color: var(--ink-soft); border-left-color: #b9b0a5; font-style: italic;
+}
+
+.week-legend { display: flex; gap: 1.1rem; flex-wrap: wrap; margin-top: .7rem; align-items: center; }
+.week-legend .key { width: 14px; height: 10px; border-radius: 3px; display: inline-block; margin-right: .3rem; vertical-align: middle; }
+.key-confirmed { background: var(--accent); }
+.key-pending { background: repeating-linear-gradient(45deg, var(--accent), var(--accent) 4px, rgba(255,255,255,.5) 4px, rgba(255,255,255,.5) 8px); }
+.key-external { background: #eee9e2; border: 1px solid #b9b0a5; }
+.key-now { background: #dc2626; }
+
+.chat-waiting-note {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .5rem .75rem; background: #fdf5e7; color: #7c4a03;
+  font-size: .78rem; border-bottom: 1px solid var(--line);
+}
+.chat-waiting-note .chat-dots { margin: 0; }
+.chat-waiting-note .chat-dots span { width: 5px; height: 5px; background: #b45309; }

@@ -63,13 +63,23 @@
     errorBox.hidden = !message;
   }
 
+  // "pending" and "accepted" share one pane: the conversation is live from the
+  // first automatic greeting; pending only means nobody has picked it up yet.
+  function paneFor(state) {
+    return state === "pending" ? "accepted" : state;
+  }
+
   function setState(next) {
     if (state === next) return;
     state = next;
-    ["offline", "no_session", "pending", "rejected", "accepted"].forEach(function (name) {
+    var pane = paneFor(next);
+    ["offline", "no_session", "rejected", "accepted"].forEach(function (name) {
       var el = document.getElementById("chat-state-" + name);
-      if (el) el.hidden = name !== next;
+      if (el) el.hidden = name !== pane;
     });
+    var waitingNote = document.getElementById("chat-waiting-note");
+    if (waitingNote) waitingNote.hidden = next !== "pending";
+
     var labels = {
       offline: "Currently offline",
       no_session: "Ready when you are",
@@ -129,7 +139,9 @@
 
   function poll() {
     var url = urls.widget;
-    if (state === "accepted" && lastMessageId) url += "?since_id=" + lastMessageId;
+    if ((state === "accepted" || state === "pending") && lastMessageId) {
+      url += "?since_id=" + lastMessageId;
+    }
 
     fetch(url, { credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest" } })
       .then(function (response) { return response.json(); })
@@ -149,7 +161,9 @@
         conversationId = data.conversation_id || null;
 
         // A conversation that ends or restarts elsewhere resets the transcript.
-        if (previous === "accepted" && data.state !== "accepted") {
+        var wasLive = previous === "accepted" || previous === "pending";
+        var isLive = data.state === "accepted" || data.state === "pending";
+        if (wasLive && !isLive) {
           if (log) log.innerHTML = "";
           lastMessageId = 0;
         }
@@ -174,7 +188,7 @@
   }
 
   function currentInterval() {
-    if (!isOpen) return state === "pending" ? 15000 : 45000;
+    if (!isOpen) return (state === "pending" || state === "accepted") ? 15000 : 45000;
     if (document.hidden) return 20000;
     var base = pollSeconds * 1000;
     if (quietPolls > 40) return base * 4;
@@ -201,7 +215,7 @@
     stop();
     poll();
     var input = document.getElementById("chat-input");
-    if (state === "accepted" && input) input.focus();
+    if ((state === "accepted" || state === "pending") && input) input.focus();
   }
 
   function closePanel() {
@@ -223,11 +237,11 @@
     button.disabled = true;
     post(urls.start, {
       name: document.getElementById("chat-name").value.trim(),
-      text: document.getElementById("chat-first-message").value.trim(),
+      // No opening question here any more: the salon greets first, and the
+      // visitor answers in the normal composer.
       page: window.location.pathname
     })
       .then(function () {
-        document.getElementById("chat-first-message").value = "";
         setState("pending");
         quietPolls = 0;
         stop();

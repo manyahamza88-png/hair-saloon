@@ -49,10 +49,20 @@ class ChatSettings(models.Model):
         default=False,
         help_text="Keep the bubble visible when chat is off, showing the message above instead of hiding entirely.",
     )
+    auto_greeting = models.CharField(
+        max_length=200,
+        default="Hi {name}, how may I help you?",
+        help_text=(
+            "Posted automatically the moment a visitor starts a chat, so they can type "
+            "straight away. Use {name} for the name they gave."
+        ),
+    )
     greeting = models.CharField(
         max_length=200,
-        default="Hi! A stylist has joined the chat. How can we help?",
-        help_text="Sent automatically when a member of staff accepts a chat.",
+        default="{staff} here — I am with you now.",
+        help_text=(
+            "Posted when a member of staff picks the chat up. Use {staff} for their name."
+        ),
     )
     busy_text = models.TextField(
         default=(
@@ -95,6 +105,19 @@ class ChatSettings(models.Model):
         return obj
 
     # -- availability -----------------------------------------------------
+    def render_auto_greeting(self, name: str) -> str:
+        """The opening line. Falls back gracefully if the template is odd."""
+        try:
+            return self.auto_greeting.format(name=name or "there")
+        except (KeyError, IndexError, ValueError):
+            return self.auto_greeting
+
+    def render_greeting(self, staff_name: str) -> str:
+        try:
+            return self.greeting.format(staff=staff_name or "A stylist")
+        except (KeyError, IndexError, ValueError):
+            return self.greeting
+
     def status(self, now=None) -> dict:
         from .availability import status
 

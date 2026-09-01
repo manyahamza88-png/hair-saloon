@@ -299,6 +299,93 @@ def free_busy(calendar, start: dt.datetime, end: dt.datetime) -> list[BusyBlock]
     return blocks
 
 
+@dataclass(frozen=True)
+class ExternalEvent:
+    """An event that lives in Google but was not created by this site."""
+
+    summary: str
+    start: dt.datetime
+    end: dt.datetime
+    all_day: bool
+    event_id: str
+
+
+def list_events(calendar, start: dt.datetime, end: dt.datetime,
+                skip_own: bool = True) -> list[ExternalEvent]:
+    """Real events from a Google calendar, with their titles.
+
+    ``free_busy`` only reports opaque busy blocks; the staff week view wants to
+    show *what* the stylist has in their own calendar. Events this site created
+    are skipped by default, since they are already drawn from the database.
+    """
+    service = build_service(calendar.credential, readonly=True)
+    try:
+        result = (
+            service.events()
+            .list(
+                calendarId=calendar.google_calendar_id,
+                timeMin=start.astimezone(dt.timezone.utc).isoformat(),
+                timeMax=end.astimezone(dt.timezone.utc).isoformat(),
+                singleEvents=True,      # expand recurring events into instances
+                orderBy="startTime",
+                maxResults=250,
+            )
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _wrap(exc) from exc
+
+    events = []
+    for item in result.get("items", []):
+        if item.get("status") == "cancelled":
+            continue
+        if skip_own and item.get("extendedProperties", {}).get("private", {}).get(
+            "salonAppointmentId"
+        ):
+            continue
+
+        raw_start = item.get("start", {})
+        raw_end = item.get("end", {})
+        all_day = "date" in raw_start
+        try:
+            if all_day:
+                begin = dt.datetime.fromisoformat(raw_start["date"]).replace(
+                    tzinfo=dt.timezone.utc
+                )
+                finish = dt.datetime.fromisoformat(raw_end["date"]).replace(
+                    tzinfo=dt.timezone.utc
+                )
+            else:
+                begin = dt.datetime.fromisoformat(raw_start["dateTime"].replace("Z", "+00:00"))
+                finish = dt.datetime.fromisoformat(raw_end["dateTime"].replace("Z", "+00:00"))
+        except (KeyError, ValueError):  # pragma: no cover - malformed payload
+            continue
+
+        events.append(
+            ExternalEvent(
+                summary=item.get("summary", "(no title)"),
+                start=begin,
+                end=finish,
+                all_day=all_day,
+                event_id=item.get("id", ""),
+            )
+        )
+    return events
+
+
+def safe_list_events(calendar, start: dt.datetime, end: dt.datetime) -> list[ExternalEvent]:
+    """``list_events`` that never raises: the week view must still render."""
+    if not calendar.is_google_connected:
+        return []
+    try:
+        events = list_events(calendar, start, end)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not list events for calendar %s: %s", calendar.pk, exc)
+        _record_calendar_error(calendar, str(exc))
+        return []
+    return events
+
+
 def safe_free_busy(calendar, start: dt.datetime, end: dt.datetime) -> list[BusyBlock]:
     """``free_busy`` that never raises: booking keeps working if Google is down."""
     if not calendar.is_google_connected:

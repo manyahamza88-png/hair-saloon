@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}Week of {{ week_start|date:"j M" }} - {{ salon.name }}{% endblock %}
+
+{% block content %}
+<p class="small"><a href="{% url 'booking:dashboard' %}">&larr; Dashboard</a></p>
+
+<div class="week-head">
+  <div>
+    <h1 style="margin-bottom:.2rem">
+      {{ week_start|date:"j M" }} &ndash; {{ week_end|date:"j M Y" }}
+      {% if is_current_week %}<span class="badge badge-confirmed">this week</span>{% endif %}
+    </h1>
+    <p class="small muted" style="margin:0">
+      {{ total_appointments }} appointment{{ total_appointments|pluralize }}
+      across {{ calendars|length }} calendar{{ calendars|length|pluralize }}.
+    </p>
+  </div>
+
+  <div class="week-nav">
+    <a class="btn btn-sm btn-ghost" href="?week={{ prev_week|date:'Y-m-d' }}{{ query_suffix }}">&larr; Previous</a>
+    {% if not is_current_week %}
+      <a class="btn btn-sm" href="?week={{ this_week|date:'Y-m-d' }}">Today</a>
+    {% endif %}
+    <a class="btn btn-sm btn-ghost" href="?week={{ next_week|date:'Y-m-d' }}{{ query_suffix }}">Next &rarr;</a>
+  </div>
+</div>
+
+{% if all_calendars|length > 1 %}
+  <form method="get" class="week-filter panel">
+    <input type="hidden" name="week" value="{{ week_start|date:'Y-m-d' }}">
+    <span class="small" style="font-weight:600">Show:</span>
+    {% for calendar in all_calendars %}
+      <label class="week-chip">
+        <input type="checkbox" name="calendar" value="{{ calendar.pk }}"
+               {% if calendar.pk in selected_ids %}checked{% endif %}>
+        <span class="week-swatch" style="background:{{ calendar.colour }}"></span>
+        {{ calendar.name }}
+      </label>
+    {% endfor %}
+    <label class="week-chip">
+      <input type="checkbox" name="google" value="0" {% if google_off %}checked{% endif %}>
+      Hide Google events
+    </label>
+    <button class="btn btn-sm" type="submit">Apply</button>
+  </form>
+{% endif %}
+
+{% if google_errors %}
+  <div class="alert alert-warning">
+    Some Google calendars could not be read, so their own events are missing from this grid:
+    <ul style="margin:.4rem 0 0;padding-left:1.1rem">
+      {% for name, error in google_errors %}<li class="small"><strong>{{ name }}</strong>: {{ error }}</li>{% endfor %}
+    </ul>
+  </div>
+{% endif %}
+
+<div class="week-wrap">
+  <div class="week-grid" style="--hours: {{ hour_marks|length }}">
+    <!-- time gutter -->
+    <div class="week-gutter">
+      <div class="week-dayhead"></div>
+      <div class="week-track">
+        {% for mark in hour_marks %}
+          <div class="week-hour-label" style="top:{{ mark.top_pct }}%">{{ mark.label }}</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% for day in days %}
+      <div class="week-col {% if day.is_today %}is-today{% endif %} {% if day.is_closed %}is-closed{% endif %}">
+        <div class="week-dayhead">
+          <span class="dow">{{ day.weekday_label }}</span>
+          <span class="dom">{{ day.date|date:"j" }}</span>
+          {% if day.is_closed %}
+            <span class="week-closed-tag">{{ day.closed_reason|default:"Closed" }}</span>
+          {% elif day.appointment_count %}
+            <span class="week-count">{{ day.appointment_count }}</span>
+          {% endif %}
+        </div>
+
+        <div class="week-track">
+          {% for mark in hour_marks %}
+            <div class="week-line" style="top:{{ mark.top_pct }}%"></div>
+          {% endfor %}
+
+          {% if day.is_today and now_pct is not None %}
+            <div class="week-now" style="top:{{ now_pct }}%" title="Now"></div>
+          {% endif %}
+
+          {% for entry in day.entries %}
+            {% if entry.kind == 'appointment' %}
+              <a class="week-entry {% if entry.is_pending %}is-pending{% endif %}"
+                 style="top:{{ entry.top_pct }}%;height:{{ entry.height_pct }}%;--c:{{ entry.colour }}"
+                 href="{% url 'booking:appointment_detail' entry.public_id %}"
+                 title="{{ entry.time_label }} {{ entry.label }} — {{ entry.sublabel }} ({{ entry.calendar_name }})">
+                <span class="week-entry-time">{{ entry.time_label }}</span>
+                <span class="week-entry-name">{{ entry.label }}</span>
+                <span class="week-entry-sub">{{ entry.sublabel }}</span>
+              </a>
+            {% else %}
+              <div class="week-entry is-external"
+                   style="top:{{ entry.top_pct }}%;height:{{ entry.height_pct }}%;--c:{{ entry.colour }}"
+                   title="{{ entry.time_label }} {{ entry.label }} — {{ entry.sublabel }}">
+                <span class="week-entry-time">{{ entry.time_label }}</span>
+                <span class="week-entry-name">{{ entry.label }}</span>
+              </div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="week-legend small muted">
+  <span><i class="key key-confirmed"></i> Confirmed</span>
+  <span><i class="key key-pending"></i> Awaiting your answer</span>
+  <span><i class="key key-external"></i> From the stylist's own Google Calendar</span>
+  {% if now_pct is not None %}<span><i class="key key-now"></i> Now</span>{% endif %}
+</div>
+
+<p class="help" style="margin-top:1rem">
+  Google events are read live and are never changed by this site. Bookings made here
+  appear in Google as well &mdash; they are not duplicated in this grid.
+</p>
+{% endblock %}

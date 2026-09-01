@@ -36,24 +36,12 @@
           <label for="chat-name">Your name</label>
           <input type="text" id="chat-name" name="name" class="field-input" maxlength="80" placeholder="e.g. Ana">
         </div>
-        <div class="field">
-          <label for="chat-first-message">How can we help?</label>
-          <textarea id="chat-first-message" name="text" class="field-input" rows="3"
-                    maxlength="2000" placeholder="Ask about a service, a price, or a time&hellip;"></textarea>
-        </div>
         <button class="btn" type="submit" style="width:100%">Start chat</button>
       </form>
     </div>
 
     <!-- waiting ---------------------------------------------------------- -->
-    <div class="chat-state" id="chat-state-pending" hidden>
-      <div class="chat-waiting">
-        <div class="chat-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-        <p class="chat-note">Waiting for someone to join&hellip;</p>
-        <p class="small muted">We are usually with you in a minute or two. You can keep browsing &mdash; the chat stays open.</p>
-        <button type="button" class="btn btn-sm btn-ghost" data-chat-cancel>Cancel</button>
-      </div>
-    </div>
+
 
     <!-- declined --------------------------------------------------------- -->
     <div class="chat-state" id="chat-state-rejected" hidden>
@@ -66,6 +54,10 @@
 
     <!-- live ------------------------------------------------------------- -->
     <div class="chat-state chat-state-live" id="chat-state-accepted" hidden>
+      <div id="chat-waiting-note" class="chat-waiting-note" hidden>
+        <span class="chat-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+        Connecting you to a stylist &mdash; type away, they will see everything.
+      </div>
       <div id="chat-log" class="chat-log" aria-live="polite"></div>
       <form id="chat-send-form" class="chat-composer" autocomplete="off">
         <textarea id="chat-input" class="field-input" rows="1" maxlength="2000"

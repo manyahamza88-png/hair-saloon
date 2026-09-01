@@ -30,9 +30,12 @@ class ChatTestCase(TestCase):
         self.settings_row.save()
         self.staff = User.objects.create_user("stylist", password="pw12345!", is_staff=True)
 
-    def start_chat(self, client=None, name="Ana", text="Do you do balayage?"):
+    def start_chat(self, client=None, name="Ana", text=""):
         client = client or self.client
-        return client.post(reverse("chat:start"), {"name": name, "text": text, "page": "/book/maria/"})
+        data = {"name": name, "page": "/book/maria/"}
+        if text:
+            data["text"] = text
+        return client.post(reverse("chat:start"), data)
 
 
 class WidgetStateTests(ChatTestCase):
@@ -63,8 +66,10 @@ class WidgetStateTests(ChatTestCase):
         self.assertEqual(conversation.status, Conversation.STATUS_PENDING)
         self.assertEqual(conversation.guest_name, "Ana")
         self.assertEqual(conversation.opened_from, "/book/maria/")
-        # The opening question is kept, so staff see it before accepting.
-        self.assertEqual(conversation.messages.count(), 1)
+        # The salon greets first, by name, so the visitor can type immediately.
+        opening = conversation.messages.get()
+        self.assertEqual(opening.sender_type, Message.STAFF)
+        self.assertEqual(opening.text, "Hi Ana, how may I help you?")
 
         self.assertEqual(self.client.get(reverse("chat:widget")).json()["state"], "pending")
 
@@ -265,30 +270,51 @@ class ConversationFlowTests(ChatTestCase):
         conversation.refresh_from_db()
         self.assertEqual(conversation.status, Conversation.STATUS_ACCEPTED)
         self.assertEqual(conversation.accepted_by, self.staff)
-        greeting = conversation.messages.filter(sender_type=Message.STAFF).first()
-        self.assertEqual(greeting.text, self.settings_row.greeting)
 
-    def test_customer_can_only_send_once_accepted(self):
+        # Two staff messages now: the automatic opener, then the handover.
+        staff_messages = list(conversation.messages.filter(sender_type=Message.STAFF))
+        self.assertEqual(len(staff_messages), 2)
+        self.assertEqual(staff_messages[0].text, "Hi Ana, how may I help you?")
+        self.assertIn("stylist", staff_messages[1].text.lower())
+        self.assertNotIn("{staff}", staff_messages[1].text)  # rendered, not raw
+
+    def test_customer_can_reply_to_the_greeting_before_anyone_accepts(self):
+        """The whole point of greeting first: no dead wait."""
         self.start_chat()
-        blocked = self.client.post(reverse("chat:send"), {"text": "Hello?"})
-        self.assertEqual(blocked.status_code, 400)
+        conversation = Conversation.objects.get()
 
+        ok = self.client.post(reverse("chat:send"), {"text": "Do you do balayage?"})
+        self.assertEqual(ok.status_code, 200)
+        self.assertTrue(conversation.messages.filter(text="Do you do balayage?").exists())
+
+        # Staff see it waiting, question and all, before accepting.
+        staff_client = self.client_class()
+        staff_client.force_login(self.staff)
+        payload = staff_client.get(reverse("chat:live_data")).json()
+        self.assertEqual(payload["waiting"][0]["last_message"], "Do you do balayage?")
+
+    def test_a_closed_chat_refuses_new_messages(self):
+        self.start_chat()
+        conversation = Conversation.objects.get()
+        conversation.status = Conversation.STATUS_CLOSED
+        conversation.save()
+        self.assertEqual(
+            self.client.post(reverse("chat:send"), {"text": "hello?"}).status_code, 400
+        )
+
+    def test_accepting_says_who_took_over(self):
+        self.start_chat()
         conversation = Conversation.objects.get()
         staff_client = self.client_class()
         staff_client.force_login(self.staff)
         staff_client.post(reverse("chat:accept", args=[conversation.pk]))
 
-        ok = self.client.post(reverse("chat:send"), {"text": "Hello?"})
-        self.assertEqual(ok.status_code, 200)
-        self.assertTrue(conversation.messages.filter(text="Hello?").exists())
+        handover = conversation.messages.filter(sender_type=Message.STAFF).last()
+        self.assertIn("stylist", handover.text.lower())
+        self.assertEqual(handover.sender_name, "stylist")
 
     def test_empty_messages_are_rejected(self):
         self.start_chat()
-        conversation = Conversation.objects.get()
-        staff_client = self.client_class()
-        staff_client.force_login(self.staff)
-        staff_client.post(reverse("chat:accept", args=[conversation.pk]))
-
         self.assertEqual(self.client.post(reverse("chat:send"), {"text": "   "}).status_code, 400)
 
     def test_declining_sends_the_busy_message_and_frees_the_visitor(self):
@@ -317,7 +343,7 @@ class ConversationFlowTests(ChatTestCase):
         staff_client.post(reverse("chat:accept", args=[conversation.pk]))
 
         first = self.client.get(reverse("chat:widget")).json()
-        self.assertTrue(first["messages"])
+        self.assertTrue(first["messages"])  # greeting + handover
         latest_id = first["messages"][-1]["id"]
 
         again = self.client.get(reverse("chat:widget"), {"since_id": latest_id}).json()
@@ -461,12 +487,8 @@ class RetentionTests(ChatTestCase):
 class EscapingTests(ChatTestCase):
     def test_message_text_is_returned_as_data_not_markup(self):
         """The widget renders with textContent, and the API must not pre-escape."""
-        self.start_chat(text="<script>alert(1)</script>")
-        conversation = Conversation.objects.get()
-        staff_client = self.client_class()
-        staff_client.force_login(self.staff)
-        staff_client.post(reverse("chat:accept", args=[conversation.pk]))
-
+        self.start_chat()
+        self.client.post(reverse("chat:send"), {"text": "<script>alert(1)</script>"})
         payload = self.client.get(reverse("chat:widget")).json()
         texts = [m["text"] for m in payload["messages"]]
         self.assertIn("<script>alert(1)</script>", texts)
@@ -474,9 +496,5 @@ class EscapingTests(ChatTestCase):
     def test_overlong_messages_are_truncated(self):
         self.start_chat()
         conversation = Conversation.objects.get()
-        staff_client = self.client_class()
-        staff_client.force_login(self.staff)
-        staff_client.post(reverse("chat:accept", args=[conversation.pk]))
-
         self.client.post(reverse("chat:send"), {"text": "x" * 5000})
         self.assertEqual(len(conversation.messages.filter(sender_type=Message.CUSTOMER).last().text), 2000)

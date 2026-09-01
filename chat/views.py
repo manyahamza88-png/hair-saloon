@@ -14,6 +14,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from booking.models import SalonSettings
+
 from .models import ChatSettings, Conversation, Message
 
 logger = logging.getLogger(__name__)
@@ -119,7 +121,12 @@ def widget(request):
 
     if conversation.status == Conversation.STATUS_PENDING:
         return JsonResponse(
-            {**payload, "state": "pending", "waiting_seconds": conversation.waiting_seconds(), "messages": []}
+            {
+                **payload,
+                "state": "pending",
+                "waiting_seconds": conversation.waiting_seconds(),
+                "messages": _messages_since(conversation, request.GET.get("since_id")),
+            }
         )
 
     if conversation.status == Conversation.STATUS_REJECTED:
@@ -164,6 +171,17 @@ def start(request):
         status=Conversation.STATUS_PENDING,
     )
 
+    # The salon speaks first. With no user accounts there is nothing to greet
+    # by default, so the opening line names whoever just introduced themselves
+    # and invites the question -- the visitor can type immediately instead of
+    # staring at a spinner until somebody accepts.
+    Message.objects.create(
+        conversation=conversation,
+        sender_type=Message.STAFF,
+        sender_name=SalonSettings.load().name,
+        text=chat_settings.render_auto_greeting(conversation.display_name),
+    )
+
     first_message = request.POST.get("text", "").strip()
     if first_message:
         Message.objects.create(
@@ -189,7 +207,9 @@ def send(request):
         return JsonResponse({"error": "Nothing to send."}, status=400)
 
     conversation = _current_conversation(request, include_rejected=False)
-    if conversation is None or conversation.status != Conversation.STATUS_ACCEPTED:
+    # Pending counts: the visitor answers the automatic greeting before any
+    # member of staff has picked the chat up.
+    if conversation is None or not conversation.is_open:
         return JsonResponse({"error": "This chat is no longer active."}, status=400)
 
     message = Message.objects.create(
@@ -310,11 +330,12 @@ def accept(request, conversation_id):
     conversation.accepted_at = timezone.now()
     conversation.save(update_fields=["status", "accepted_by", "accepted_at", "updated_at"])
 
+    staff_name = request.user.get_short_name() or request.user.get_username()
     Message.objects.create(
         conversation=conversation,
         sender_type=Message.STAFF,
-        sender_name=request.user.get_short_name() or request.user.get_username(),
-        text=chat_settings.greeting,
+        sender_name=staff_name,
+        text=chat_settings.render_greeting(staff_name),
     )
     return _ok_or_redirect(request, {"status": "ok", "conversation_id": conversation.pk})
 

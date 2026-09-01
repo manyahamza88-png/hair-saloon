@@ -22,6 +22,7 @@
         {% if salon.phone %}<a href="tel:{{ salon.phone }}">{{ salon.phone }}</a>{% endif %}
         {% if user.is_staff %}
           <a href="{% url 'booking:dashboard' %}">Dashboard</a>
+          <a href="{% url 'booking:week' %}">Week</a>
           <a href="{% url 'booking:google_setup' %}">Google</a>
           <a href="{% url 'chat:desk' %}">Chat</a>
           <a href="/admin/">Admin</a>

@@ -17,6 +17,7 @@ from django.conf import settings as settings_module
 from . import (
     availability,
     gmail,
+    week as week_module,
     google_calendar,
     google_oauth,
     services as booking_services,
@@ -423,6 +424,43 @@ def dashboard_decide(request, public_id):
         messages.error(request, "Unknown action.")
 
     return redirect("booking:dashboard")
+
+
+@staff_member_required
+def week_view(request):
+    """The staff timetable: one week, every calendar, appointments + Google."""
+    salon = SalonSettings.load()
+
+    try:
+        start = dt.date.fromisoformat(request.GET.get("week", ""))
+    except ValueError:
+        start = None
+
+    selected_ids = [v for v in request.GET.getlist("calendar") if v.isdigit()]
+    all_calendars = list(Calendar.objects.filter(is_active=True))
+    chosen = [c for c in all_calendars if str(c.pk) in selected_ids] or all_calendars
+
+    data = week_module.staff_week(
+        week_start=start,
+        calendars=chosen,
+        include_google=request.GET.get("google") != "0",
+        salon=salon,
+    )
+    # Keep the calendar filter when stepping to another week.
+    suffix = "".join(f"&calendar={c.pk}" for c in chosen) if len(chosen) < len(all_calendars) else ""
+    if request.GET.get("google") == "0":
+        suffix += "&google=0"
+
+    data.update(
+        {
+            "salon": salon,
+            "all_calendars": all_calendars,
+            "selected_ids": [c.pk for c in chosen],
+            "google_off": request.GET.get("google") == "0",
+            "query_suffix": suffix,
+        }
+    )
+    return render(request, "booking/week.html", data)
 
 
 # ---------------------------------------------------------------------------

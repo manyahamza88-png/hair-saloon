@@ -16,6 +16,7 @@ urlpatterns = [
     path("decide/<uuid:public_id>/done/", views.decision_done, name="decision_done"),
     path("cancel/<str:token>/", views.cancel, name="cancel"),
     path("manage/", views.dashboard, name="dashboard"),
+    path("manage/week/", views.week_view, name="week"),
     path("manage/google/", views.google_setup, name="google_setup"),
     path("manage/google/client/", views.google_client_save, name="google_client_save"),
     path("manage/google/connect/", views.google_connect, name="google_connect"),
