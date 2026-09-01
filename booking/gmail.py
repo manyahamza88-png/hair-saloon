@@ -58,10 +58,15 @@ def sending_credential():
     """The connected Google account used for outgoing mail, or None."""
     from .models import GoogleCredential
 
-    credential = GoogleCredential.objects.filter(
+    # With one account per stylist, the salon nominates which one sends mail;
+    # otherwise fall back to whichever connected account can.
+    candidates = GoogleCredential.objects.filter(
         auth_type=GoogleCredential.OAUTH, is_active=True
-    ).first()
-    return credential if can_send_email(credential) else None
+    ).order_by("-is_default_sender", "pk")
+    for credential in candidates:
+        if can_send_email(credential):
+            return credential
+    return None
 
 
 def _service(credential):

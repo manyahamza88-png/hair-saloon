@@ -23,6 +23,7 @@ urlpatterns = [
     path("manage/google/callback/", views.google_callback, name="google_callback"),
     path("manage/google/disconnect/", views.google_disconnect, name="google_disconnect"),
     path("manage/google/add-calendar/", views.google_add_calendar, name="google_add_calendar"),
+    path("manage/google/link-calendar/", views.google_link_calendar, name="google_link_calendar"),
     path("manage/<uuid:public_id>/action/", views.dashboard_decide, name="dashboard_decide"),
     path("manage/add/", views.dashboard_add, name="dashboard_add"),
 ]

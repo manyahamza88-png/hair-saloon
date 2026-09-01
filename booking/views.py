@@ -469,51 +469,98 @@ def week_view(request):
 OAUTH_CREDENTIAL_NAME = "Connected Google account"
 
 
+def _oauth_credentials():
+    """Every Google account linked through the browser flow."""
+    return GoogleCredential.objects.filter(auth_type=GoogleCredential.OAUTH).order_by(
+        "-is_default_sender", "name"
+    )
+
+
 def _oauth_credential(create: bool = False):
-    """The single credential row used by the browser OAuth flow."""
-    credential = GoogleCredential.objects.filter(auth_type=GoogleCredential.OAUTH).first()
+    """The first linked account, for callers that just need any of them."""
+    credential = _oauth_credentials().first()
     if credential is None and create:
         credential = GoogleCredential.objects.create(
-            name=OAUTH_CREDENTIAL_NAME, auth_type=GoogleCredential.OAUTH
+            name=OAUTH_CREDENTIAL_NAME, auth_type=GoogleCredential.OAUTH, is_default_sender=True
         )
     return credential
+
+
+def _credential_for_account(email: str, reconnecting=None):
+    """Find or create the credential row for one Google account.
+
+    Keyed on the address Google reports, so re-authorising the same account
+    updates it in place while connecting a second account adds a row of its own
+    -- which is what lets each stylist link their own calendar.
+    """
+    if reconnecting is not None:
+        return reconnecting
+    if email:
+        existing = _oauth_credentials().filter(oauth_account_email__iexact=email).first()
+        if existing:
+            return existing
+    return GoogleCredential.objects.create(
+        name=email or OAUTH_CREDENTIAL_NAME,
+        auth_type=GoogleCredential.OAUTH,
+        oauth_account_email=email,
+        # The first account linked becomes the one salon email is sent from.
+        is_default_sender=not _oauth_credentials().exists(),
+    )
 
 
 @staff_member_required
 def google_setup(request):
     """One page for the whole Google integration."""
     client = GoogleOAuthClientSettings.load()
-    credential = _oauth_credential()
-
-    google_calendars, listing_error = [], ""
-    if credential and credential.is_connected:
-        try:
-            google_calendars = google_calendar.list_calendars(credential)
-        except Exception as exc:  # noqa: BLE001 - shown on the page
-            listing_error = str(exc)
+    credentials = list(_oauth_credentials())
 
     linked = {
         calendar.google_calendar_id: calendar
         for calendar in Calendar.objects.exclude(google_calendar_id="")
     }
-    for item in google_calendars:
-        item["linked"] = linked.get(item["id"])
-        item["writable"] = item.get("access_role") in {"owner", "writer"}
 
+    # One block per connected Google account, so each stylist's calendars sit
+    # under the account they belong to.
+    accounts = []
+    for credential in credentials:
+        google_calendars, listing_error = [], ""
+        if credential.is_connected:
+            try:
+                google_calendars = google_calendar.list_calendars(credential)
+            except Exception as exc:  # noqa: BLE001 - shown on the page
+                listing_error = str(exc)
+        for item in google_calendars:
+            item["linked"] = linked.get(item["id"])
+            item["writable"] = item.get("access_role") in {"owner", "writer"}
+        accounts.append(
+            {
+                "credential": credential,
+                "calendars": google_calendars,
+                "error": listing_error,
+                "can_send_email": gmail.can_send_email(credential),
+                "site_calendars": list(credential.calendars.all()),
+            }
+        )
+
+    # A calendar with no account attached writes nothing to Google. That is the
+    # quiet failure worth shouting about on this page.
+    unlinked = list(Calendar.objects.filter(credential__isnull=True, is_active=True))
+
+    first = credentials[0] if credentials else None
     return render(
         request,
         "booking/google_setup.html",
         {
             "salon": SalonSettings.load(),
             "client": client,
-            "credential": credential,
-            "connected": bool(credential and credential.is_connected),
-            "can_send_email": gmail.can_send_email(credential),
+            "accounts": accounts,
+            "unlinked": unlinked,
+            "credential": first,
+            "connected": any(a["credential"].is_connected for a in accounts),
+            "can_send_email": any(a["can_send_email"] for a in accounts),
             # Django always defines EMAIL_HOST ("localhost"), so the backend in
             # use is the honest signal for whether SMTP is configured.
             "smtp_configured": "smtp" in settings_module.EMAIL_BACKEND.lower(),
-            "google_calendars": google_calendars,
-            "listing_error": listing_error,
             "callback_url": google_oauth.callback_url(request),
             "env_fallback": bool(
                 not client.client_id and settings_module.GOOGLE_OAUTH_CLIENT_ID
@@ -548,8 +595,17 @@ def google_client_save(request):
 
 @staff_member_required
 def google_connect(request):
-    """Send the admin to Google's consent screen."""
+    """Send the admin to Google's consent screen.
+
+    ``?credential=<pk>`` re-authorises that account in place. Without it, a new
+    account is linked alongside the existing ones, which is how a second
+    stylist connects their own calendar.
+    """
     client_id, client_secret = GoogleOAuthClientSettings.effective()
+    reconnect = request.GET.get("credential", "")
+    request.session[google_oauth.SESSION_CREDENTIAL] = (
+        int(reconnect) if reconnect.isdigit() else None
+    )
     try:
         auth_url = google_oauth.start(request, client_id, client_secret)
     except Exception as exc:  # noqa: BLE001
@@ -569,7 +625,11 @@ def google_callback(request):
     try:
         creds = google_oauth.finish(request, client_id, client_secret)
         email = google_oauth.account_email(creds)
-        credential = _oauth_credential(create=True)
+        reconnect_pk = request.session.pop(google_oauth.SESSION_CREDENTIAL, None)
+        reconnecting = (
+            GoogleCredential.objects.filter(pk=reconnect_pk).first() if reconnect_pk else None
+        )
+        credential = _credential_for_account(email, reconnecting=reconnecting)
         if not creds.refresh_token and not credential.get_refresh_token():
             messages.error(
                 request,
@@ -593,20 +653,30 @@ def google_callback(request):
 @staff_member_required
 @require_POST
 def google_disconnect(request):
-    credential = _oauth_credential()
+    pk = request.POST.get("credential", "")
+    credential = (
+        _oauth_credentials().filter(pk=pk).first() if pk.isdigit() else _oauth_credential()
+    )
     if credential:
         if request.POST.get("revoke"):
             google_oauth.revoke(credential)
         google_oauth.disconnect(credential)
-        messages.info(request, "Google account disconnected. Existing bookings are untouched.")
+        messages.info(
+            request,
+            f"Disconnected {credential.oauth_account_email or 'the Google account'}. "
+            "Its calendars and bookings are untouched, but they will stop syncing.",
+        )
     return redirect("booking:google_setup")
 
 
 @staff_member_required
 @require_POST
 def google_add_calendar(request):
-    """Add one of the connected account's calendars to the homepage."""
-    credential = _oauth_credential()
+    """Add one of a connected account's calendars to the homepage."""
+    pk = request.POST.get("credential", "")
+    credential = (
+        _oauth_credentials().filter(pk=pk).first() if pk.isdigit() else _oauth_credential()
+    )
     if not (credential and credential.is_connected):
         messages.error(request, "Connect a Google account first.")
         return redirect("booking:google_setup")
@@ -633,6 +703,50 @@ def google_add_calendar(request):
     messages.success(
         request,
         f"Added '{calendar.name}' to the homepage. Set its opening hours and photo any time.",
+    )
+    return redirect("booking:google_setup")
+
+
+@staff_member_required
+@require_POST
+def google_link_calendar(request):
+    """Attach an existing site calendar to a connected Google account.
+
+    Without this, a calendar created before any account was linked (the sample
+    one, or one added by hand in the admin) silently writes nothing to Google.
+    """
+    calendar = get_object_or_404(Calendar, pk=request.POST.get("calendar"))
+    pk = request.POST.get("credential", "")
+    credential = _oauth_credentials().filter(pk=pk).first() if pk.isdigit() else None
+    google_id = request.POST.get("google_calendar_id", "").strip()
+
+    if credential is None or not credential.is_connected:
+        messages.error(request, "Pick a connected Google account.")
+        return redirect("booking:google_setup")
+    if not google_id:
+        messages.error(request, "Pick which Google calendar it should write to.")
+        return redirect("booking:google_setup")
+
+    clash = Calendar.objects.filter(google_calendar_id=google_id).exclude(pk=calendar.pk).first()
+    if clash:
+        messages.warning(request, f"That Google calendar is already used by '{clash.name}'.")
+        return redirect("booking:google_setup")
+
+    calendar.credential = credential
+    calendar.google_calendar_id = google_id
+    calendar.last_sync_error = ""
+    calendar.save(update_fields=["credential", "google_calendar_id", "last_sync_error"])
+
+    # Push anything already booked, so the stylist's phone catches up at once.
+    pushed = sum(
+        1
+        for appointment in calendar.appointments.blocking().upcoming()
+        if booking_services.resync_appointment(appointment)
+    )
+    messages.success(
+        request,
+        f"'{calendar.name}' now writes to Google."
+        + (f" {pushed} existing appointment(s) pushed." if pushed else ""),
     )
     return redirect("booking:google_setup")
 

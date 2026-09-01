@@ -552,3 +552,29 @@ class WidgetVisibilityTests(ChatTestCase):
 
         source = Path(django_settings.BASE_DIR) / "static" / "js" / "chat.js"
         self.assertTrue(source.exists(), "static/js/chat.js is missing from the project")
+
+
+class TemplateHygieneTests(TestCase):
+    """Guard against template mistakes that leak text onto customer pages."""
+
+    def test_no_multiline_django_comments_in_any_template(self):
+        """A {# #} comment spanning lines is not a comment: it renders."""
+        from pathlib import Path
+
+        from django.conf import settings as django_settings
+
+        leaks = []
+        for path in Path(django_settings.BASE_DIR).rglob("*.html"):
+            if "staticfiles" in str(path):
+                continue
+            for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                if "{#" in line and "#}" not in line.split("{#", 1)[1]:
+                    leaks.append(f"{path.name}:{number}")
+        self.assertEqual(leaks, [], f"multi-line {{# #}} comments leak onto the page: {leaks}")
+
+    def test_no_stray_template_syntax_reaches_the_homepage(self):
+        page = self.client.get("/").content.decode()
+        for marker in ["{#", "#}", "{%", "%}", "{{", "}}"]:
+            self.assertNotIn(marker, page, f"unrendered template syntax {marker!r} on the page")

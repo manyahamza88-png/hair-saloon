@@ -261,6 +261,14 @@ class GoogleCredential(models.Model):
     )
 
     is_active = models.BooleanField(default=True)
+    is_default_sender = models.BooleanField(
+        "send salon email from this account",
+        default=False,
+        help_text=(
+            "With several Google accounts connected, this is the one booking emails are "
+            "sent from. Only one account can be the sender."
+        ),
+    )
     last_checked_at = models.DateTimeField(null=True, blank=True, editable=False)
     last_check_result = models.TextField(blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -296,6 +304,13 @@ class GoogleCredential(models.Model):
         if self.auth_type == self.OAUTH:
             return bool(self.oauth_refresh_token)
         return bool(self.service_account_json.strip())
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.is_default_sender:
+            GoogleCredential.objects.filter(is_default_sender=True).exclude(pk=self.pk).update(
+                is_default_sender=False
+            )
 
     @property
     def service_account_email(self) -> str:

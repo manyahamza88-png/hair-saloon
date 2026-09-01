@@ -401,3 +401,8 @@ details.guide[open] > summary { border-bottom: 1px solid var(--line); }
 }
 .chat-waiting-note .chat-dots { margin: 0; }
 .chat-waiting-note .chat-dots span { width: 5px; height: 5px; background: #b45309; }
+
+.acct { border: 1px solid var(--line); border-radius: 10px; padding: .8rem 1rem; margin-bottom: .9rem; }
+.acct-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: .6rem; }
+.acct table.list { background: transparent; }
+.link-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; padding: .55rem 0; border-top: 1px dashed var(--line); }

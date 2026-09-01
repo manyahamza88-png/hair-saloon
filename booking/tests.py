@@ -626,7 +626,7 @@ class GoogleOAuthSetupTests(BaseSalonTest):
         self.assertContains(response, "Maria")
         self.assertContains(response, "Ben")
         # A read-only calendar cannot take bookings, so it offers no Add button.
-        self.assertContains(response, "Read-only access")
+        self.assertContains(response, "Read-only")
 
     def test_adding_a_calendar_puts_it_on_the_homepage(self):
         credential = self._connect()
@@ -708,9 +708,9 @@ class GoogleOAuthSetupTests(BaseSalonTest):
         self.assertFalse(gmail.can_send_email(credential))
         self.assertIsNone(gmail.sending_credential())
 
-        # ...and the page says so rather than failing at booking time.
+        # ...and the page flags it rather than failing at booking time.
         page = self.client.get(reverse("booking:google_setup")).content.decode()
-        self.assertIn("cannot send email yet", page)
+        self.assertIn("no email permission", page)
 
     def test_a_full_connection_can_send(self):
         from booking import gmail
@@ -767,10 +767,23 @@ class GoogleOAuthSetupTests(BaseSalonTest):
         self.assertIn(f'<div class="guide-uri"><code>https://testserver{callback}</code></div>', page)
 
     def test_setup_page_explains_adding_more_calendars(self):
-        response = self.client.get(reverse("booking:google_setup"))
-        page = response.content.decode()
-        for expected in ["Create new calendar", "Other calendars", "Show on the homepage as"]:
+        """The guide covers both a shared salon account and per-stylist accounts."""
+        page = self.client.get(reverse("booking:google_setup")).content.decode()
+        for expected in [
+            "Create new calendar",
+            "Other calendars",
+            "Connect another Google account",
+        ]:
             self.assertIn(expected, page, expected)
+
+    def test_the_naming_column_appears_once_an_account_is_connected(self):
+        self._connect()
+        listing = [
+            {"id": "a@group.calendar.google.com", "summary": "Maria", "access_role": "owner", "primary": False}
+        ]
+        with mock.patch("booking.google_calendar.list_calendars", return_value=listing):
+            page = self.client.get(reverse("booking:google_setup")).content.decode()
+        self.assertIn("Show on the homepage as", page)
 
     # -- the PythonAnywhere proxy quirk ------------------------------------
     def test_callback_url_is_forced_to_https(self):
@@ -1129,3 +1142,95 @@ class GoogleReadBackTests(BaseSalonTest):
         self.assertNotIn("ACCEPT:", body["description"])
         self.assertIn(tokens.cancel_url(self.appointment), body["description"])
         self.assertEqual(body["status"], "confirmed")
+
+
+class PerCalendarOAuthTests(BaseSalonTest):
+    """Each calendar is tied to the Google account it came from."""
+
+    def setUp(self):
+        super().setUp()
+        self.staff = User.objects.create_user("owner", password="pw!", is_staff=True)
+        self.client.force_login(self.staff)
+
+    def _creds(self, refresh="r"):
+        return mock.Mock(
+            token="t", refresh_token=refresh, expiry=None,
+            scopes=["https://www.googleapis.com/auth/calendar"],
+        )
+
+    def _connect_as(self, email):
+        with mock.patch("booking.google_oauth.finish", return_value=self._creds()), \
+             mock.patch("booking.google_oauth.account_email", return_value=email):
+            self.client.get(reverse("booking:google_callback"), {"code": "x"})
+        return GoogleCredential.objects.get(oauth_account_email=email)
+
+    def test_two_stylists_get_separate_credentials(self):
+        maria = self._connect_as("maria@gmail.com")
+        ben = self._connect_as("ben@gmail.com")
+        self.assertNotEqual(maria.pk, ben.pk)
+        self.assertEqual(GoogleCredential.objects.filter(auth_type=GoogleCredential.OAUTH).count(), 2)
+        # The first one connected sends the salon's email.
+        self.assertTrue(maria.is_default_sender)
+        ben.refresh_from_db()
+        self.assertFalse(ben.is_default_sender)
+
+    def test_reconnecting_the_same_account_updates_it_in_place(self):
+        first = self._connect_as("maria@gmail.com")
+        again = self._connect_as("maria@gmail.com")
+        self.assertEqual(first.pk, again.pk)
+        self.assertEqual(GoogleCredential.objects.count(), 1)
+
+    def test_a_calendar_is_added_against_its_own_account(self):
+        maria = self._connect_as("maria@gmail.com")
+        ben = self._connect_as("ben@gmail.com")
+
+        self.client.post(
+            reverse("booking:google_add_calendar"),
+            {"credential": ben.pk, "calendar_id": "ben@group.calendar.google.com",
+             "name": "Ben - Barbering", "owner_email": "ben@gmail.com"},
+        )
+        calendar = Calendar.objects.get(google_calendar_id="ben@group.calendar.google.com")
+        self.assertEqual(calendar.credential, ben)
+        self.assertNotEqual(calendar.credential, maria)
+        self.assertTrue(calendar.is_google_connected)
+
+    def test_disconnecting_one_account_leaves_the_other_working(self):
+        maria = self._connect_as("maria@gmail.com")
+        ben = self._connect_as("ben@gmail.com")
+        self.client.post(reverse("booking:google_disconnect"), {"credential": ben.pk})
+
+        maria.refresh_from_db(); ben.refresh_from_db()
+        self.assertTrue(maria.is_connected)
+        self.assertFalse(ben.is_connected)
+
+    def test_an_unlinked_calendar_is_flagged_and_can_be_linked(self):
+        """This is the failure where bookings silently never reach Google."""
+        self.assertIsNone(self.calendar.credential)
+        page = self.client.get(reverse("booking:google_setup")).content.decode()
+        self.assertIn("do not reach Google", page)
+        self.assertIn(self.calendar.name, page)
+
+        maria = self._connect_as("maria@gmail.com")
+        with mock.patch("booking.google_calendar.push_appointment", return_value="evt"):
+            self.client.post(
+                reverse("booking:google_link_calendar"),
+                {"calendar": self.calendar.pk, "credential": maria.pk,
+                 "google_calendar_id": "maria@group.calendar.google.com"},
+            )
+        self.calendar.refresh_from_db()
+        self.assertEqual(self.calendar.credential, maria)
+        self.assertTrue(self.calendar.is_google_connected)
+
+    def test_linking_pushes_existing_bookings(self):
+        appointment = self.make_appointment()      # made before any Google link
+        maria = self._connect_as("maria@gmail.com")
+
+        with mock.patch("booking.google_calendar.push_appointment", return_value="evt-9") as push:
+            self.client.post(
+                reverse("booking:google_link_calendar"),
+                {"calendar": self.calendar.pk, "credential": maria.pk,
+                 "google_calendar_id": "maria@group.calendar.google.com"},
+            )
+        push.assert_called()
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.google_event_id, "evt-9")
