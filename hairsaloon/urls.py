@@ -9,6 +9,7 @@ admin.site.index_title = "Salon configuration"
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("chat/", include("chat.urls")),
     path("", include("booking.urls")),
 ]
 

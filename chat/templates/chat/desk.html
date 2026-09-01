@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+
+{% block title %}Chat desk - {{ salon.name }}{% endblock %}
+
+{% block content %}
+<p class="small"><a href="{% url 'booking:dashboard' %}">&larr; Dashboard</a></p>
+
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
+  <div>
+    <h1>Chat desk</h1>
+    <p class="lede" style="margin-bottom:.6rem">
+      Requests appear here while live chat is on. Nothing is sent to the customer until you accept.
+    </p>
+  </div>
+  <div class="desk-switch panel">
+    <div class="desk-switch-state">
+      {% if availability.available %}
+        <span class="chat-dot chat-dot-live" aria-hidden="true"></span>
+        <strong>Live now</strong>
+      {% elif availability.reason == 'outside_hours' %}
+        <span class="chat-dot chat-dot-waiting" aria-hidden="true"></span>
+        <strong>Outside opening hours</strong>
+      {% else %}
+        <span class="chat-dot chat-dot-off" aria-hidden="true"></span>
+        <strong>Switched off</strong>
+      {% endif %}
+    </div>
+
+    <form method="post" action="{% url 'chat:toggle' %}">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{% url 'chat:desk' %}">
+      {% if chat_settings.enabled %}
+        <button class="btn btn-sm btn-danger" type="submit">Switch off</button>
+      {% else %}
+        <button class="btn btn-sm" type="submit">Switch on</button>
+      {% endif %}
+    </form>
+
+    <div class="small muted desk-switch-note">
+      {% if chat_settings.enabled %}
+        {% if chat_settings.follow_business_hours %}
+          On during opening hours.
+        {% else %}
+          On around the clock.
+        {% endif %}
+        Switching off closes any open chats.
+      {% else %}
+        Nobody can start a chat, whatever the hours say.
+      {% endif %}
+      <a href="/admin/chat/chatsettings/">Change</a>
+    </div>
+  </div>
+</div>
+
+{% if not chat_settings.enabled %}
+  <div class="alert alert-warning">
+    Live chat is <strong>switched off</strong>, so the master switch is holding it closed
+    regardless of opening hours.
+    {% if chat_settings.show_when_offline %}
+      Customers see your offline message instead of the chat form.
+    {% else %}
+      Customers do not see the chat bubble at all.
+    {% endif %}
+  </div>
+{% elif availability.reason == 'hours_not_configured' %}
+  <div class="alert alert-info">
+    Chat is set to follow opening hours, but no
+    <a href="/admin/booking/businesshours/">business hours</a> are configured yet, so chat is
+    available at any time. Set your hours and it will follow them automatically.
+  </div>
+{% elif availability.reason == 'outside_hours' %}
+  <div class="alert alert-info">
+    Live chat is on, but the salon is closed right now, so no new chats can start.
+    {% if availability.next_open %}It reopens <strong>{{ availability.next_open|date:"l j M, H:i" }}</strong>.{% endif %}
+    <div class="small" style="margin-top:.3rem">
+      Chats already in progress can still be finished. To take chats outside opening hours,
+      turn off <em>follow business hours</em> in
+      <a href="/admin/chat/chatsettings/">chat settings</a>, or adjust
+      <a href="/admin/booking/businesshours/">business hours</a>.
+    </div>
+  </div>
+{% endif %}
+
+<div id="chat-desk"
+     data-live-url="{% url 'chat:live_data' %}"
+     data-accept-url="{% url 'chat:accept' 0 %}"
+     data-reject-url="{% url 'chat:reject' 0 %}"
+     data-close-url="{% url 'chat:close' 0 %}"
+     data-send-url="{% url 'chat:staff_send' 0 %}">
+  {% csrf_token %}
+
+  <div class="stat-row">
+    <div class="stat"><div class="n" id="desk-waiting-count">{{ waiting|length }}</div><div class="l">Waiting</div></div>
+    <div class="stat"><div class="n" id="desk-live-count">{{ live|length }}</div><div class="l">Live now</div></div>
+    <div class="stat"><div class="n">{{ recent|length }}</div><div class="l">Recently ended</div></div>
+  </div>
+
+  <h2>Waiting for an answer</h2>
+  <div id="desk-waiting">
+    {% if not waiting %}<div class="empty-state" id="desk-waiting-empty">Nobody is waiting.</div>{% endif %}
+  </div>
+
+  <h2>Live conversations</h2>
+  <div id="desk-live" class="desk-grid">
+    {% if not live %}<div class="empty-state" id="desk-live-empty">No chats in progress.</div>{% endif %}
+  </div>
+</div>
+
+<h2>Recently ended</h2>
+{% if recent %}
+  <div class="table-wrap">
+    <table class="list">
+      <tr><th>Customer</th><th>Status</th><th>Messages</th><th>Started</th><th></th></tr>
+      {% for conversation in recent %}
+        <tr>
+          <td>{{ conversation.display_name }}
+            {% if conversation.opened_from %}<div class="small muted">from {{ conversation.opened_from }}</div>{% endif %}
+          </td>
+          <td><span class="badge badge-{% if conversation.status == 'rejected' %}declined{% else %}cancelled{% endif %}">{{ conversation.get_status_display }}</span></td>
+          <td>{{ conversation.message_count }}</td>
+          <td class="small">{{ conversation.created_at|date:"j M, H:i" }}</td>
+          <td><a class="small" href="/admin/chat/conversation/{{ conversation.pk }}/change/">Read transcript</a></td>
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
+{% else %}
+  <div class="empty-state">No past conversations yet.</div>
+{% endif %}
+
+<p class="help" style="margin-top:1.2rem">
+  Transcripts are deleted automatically after {{ chat_settings.retention_days }} days.
+  Wording and timings live in <a href="/admin/chat/chatsettings/">chat settings</a>.
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  var desk = document.getElementById("chat-desk");
+  if (!desk) return;
+
+  var csrf = desk.querySelector("[name=csrfmiddlewaretoken]").value;
+  var waitingBox = document.getElementById("desk-waiting");
+  var liveBox = document.getElementById("desk-live");
+  var pollSeconds = 5;
+  var openThreads = {};   // conversation id -> highest rendered message id
+  var previousWaiting = 0;
+
+  function url(template, id) { return template.replace(/0\/$/, id + "/"); }
+
+  function post(target) {
+    return fetch(target, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRFToken": csrf,
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      credentials: "same-origin",
+      body: ""
+    });
+  }
+
+  function send(id, text) {
+    return fetch(url(desk.dataset.sendUrl, id), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRFToken": csrf,
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      credentials: "same-origin",
+      body: new URLSearchParams({ text: text }).toString()
+    });
+  }
+
+  function waitLabel(seconds) {
+    if (seconds < 60) return seconds + "s";
+    return Math.floor(seconds / 60) + " min";
+  }
+
+  function renderWaiting(items) {
+    document.getElementById("desk-waiting-count").textContent = items.length;
+    waitingBox.innerHTML = "";
+    if (!items.length) {
+      waitingBox.innerHTML = '<div class="empty-state">Nobody is waiting.</div>';
+      return;
+    }
+    items.forEach(function (item) {
+      var card = document.createElement("div");
+      card.className = "panel desk-waiting-card";
+
+      var info = document.createElement("div");
+      var name = document.createElement("strong");
+      name.textContent = item.name;
+      info.appendChild(name);
+
+      var meta = document.createElement("div");
+      meta.className = "small muted";
+      meta.textContent = "waiting " + waitLabel(item.waiting_seconds) +
+        (item.opened_from ? " · from " + item.opened_from : "");
+      info.appendChild(meta);
+
+      if (item.last_message) {
+        var quote = document.createElement("div");
+        quote.className = "small desk-quote";
+        quote.textContent = "“" + item.last_message + "”";
+        info.appendChild(quote);
+      }
+      card.appendChild(info);
+
+      var actions = document.createElement("div");
+      actions.className = "actions";
+      var accept = document.createElement("button");
+      accept.className = "btn btn-sm";
+      accept.textContent = "Accept";
+      accept.addEventListener("click", function () {
+        accept.disabled = true;
+        post(url(desk.dataset.acceptUrl, item.id)).then(refresh);
+      });
+      var reject = document.createElement("button");
+      reject.className = "btn btn-sm btn-ghost";
+      reject.textContent = "Too busy";
+      reject.addEventListener("click", function () {
+        reject.disabled = true;
+        post(url(desk.dataset.rejectUrl, item.id)).then(refresh);
+      });
+      actions.appendChild(accept);
+      actions.appendChild(reject);
+      card.appendChild(actions);
+
+      waitingBox.appendChild(card);
+    });
+  }
+
+  function threadCard(item) {
+    var card = document.createElement("div");
+    card.className = "panel desk-thread";
+    card.dataset.id = item.id;
+
+    var head = document.createElement("div");
+    head.className = "desk-thread-head";
+    var title = document.createElement("strong");
+    title.textContent = item.name;
+    head.appendChild(title);
+    var end = document.createElement("button");
+    end.className = "btn btn-sm btn-ghost";
+    end.textContent = "End";
+    end.addEventListener("click", function () {
+      post(url(desk.dataset.closeUrl, item.id)).then(refresh);
+    });
+    head.appendChild(end);
+    card.appendChild(head);
+
+    var log = document.createElement("div");
+    log.className = "chat-log desk-log";
+    card.appendChild(log);
+
+    var form = document.createElement("form");
+    form.className = "chat-composer";
+    var input = document.createElement("textarea");
+    input.className = "field-input";
+    input.rows = 1;
+    input.placeholder = "Reply…";
+    var button = document.createElement("button");
+    button.className = "btn btn-sm";
+    button.type = "submit";
+    button.textContent = "Send";
+    form.appendChild(input);
+    form.appendChild(button);
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      var text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      send(item.id, text).then(refresh);
+    });
+    input.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); form.requestSubmit(); }
+    });
+    card.appendChild(form);
+    return card;
+  }
+
+  function renderMessages(log, messages, sinceId) {
+    messages.forEach(function (message) {
+      if (message.id <= sinceId) return;
+      var row = document.createElement("div");
+      row.className = "chat-msg chat-msg-" + message.sender_type;
+      var text = document.createElement("div");
+      text.className = "chat-msg-text";
+      text.textContent = message.text;
+      row.appendChild(text);
+      var time = document.createElement("time");
+      time.className = "chat-msg-time";
+      time.textContent = message.time;
+      row.appendChild(time);
+      log.appendChild(row);
+    });
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function renderLive(items) {
+    document.getElementById("desk-live-count").textContent = items.length;
+    var seen = {};
+
+    items.forEach(function (item) {
+      seen[item.id] = true;
+      var card = liveBox.querySelector('.desk-thread[data-id="' + item.id + '"]');
+      if (!card) {
+        card = threadCard(item);
+        liveBox.appendChild(card);
+        openThreads[item.id] = 0;
+      }
+      var log = card.querySelector(".desk-log");
+      renderMessages(log, item.messages, openThreads[item.id] || 0);
+      item.messages.forEach(function (m) {
+        if (m.id > (openThreads[item.id] || 0)) openThreads[item.id] = m.id;
+      });
+    });
+
+    Array.prototype.forEach.call(liveBox.querySelectorAll(".desk-thread"), function (card) {
+      if (!seen[card.dataset.id]) { card.remove(); delete openThreads[card.dataset.id]; }
+    });
+
+    var empty = liveBox.querySelector(".empty-state");
+    if (items.length && empty) empty.remove();
+    if (!items.length && !empty) {
+      liveBox.innerHTML = '<div class="empty-state">No chats in progress.</div>';
+    }
+  }
+
+  function refresh() {
+    return fetch(desk.dataset.liveUrl, {
+      credentials: "same-origin",
+      headers: { "X-Requested-With": "XMLHttpRequest" }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        pollSeconds = data.poll_seconds || pollSeconds;
+        renderWaiting(data.waiting);
+        renderLive(data.live);
+
+        // A short chime would be nice here, but browsers block unprompted
+        // audio; the title is a reliable way to catch a busy stylist's eye.
+        if (data.waiting.length > previousWaiting) {
+          document.title = "(" + data.waiting.length + ") Chat desk";
+        } else if (!data.waiting.length) {
+          document.title = "Chat desk";
+        }
+        previousWaiting = data.waiting.length;
+      })
+      .catch(function () { /* keep polling */ });
+  }
+
+  refresh();
+  window.setInterval(function () {
+    if (!document.hidden) refresh();
+  }, Math.max(pollSeconds, 3) * 1000);
+})();
+</script>
+{% endblock %}

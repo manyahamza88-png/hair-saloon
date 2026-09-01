@@ -14,7 +14,26 @@
   <div class="stat"><div class="n">{{ todays|length }}</div><div class="l">In the shop today</div></div>
   <div class="stat"><div class="n">{{ upcoming|length }}</div><div class="l">Confirmed upcoming</div></div>
   <div class="stat"><div class="n">{{ calendars|length }}</div><div class="l">Calendars</div></div>
+  <div class="stat">
+    <div class="n">{% if chat_status.available %}{{ waiting_chats }}{% else %}&mdash;{% endif %}</div>
+    <div class="l">
+      {% if chat_status.available %}
+        Chats waiting &middot; <a href="{% url 'chat:desk' %}">open desk</a>
+      {% elif chat_status.reason == 'outside_hours' %}
+        Chat idle (closed) &middot; <a href="{% url 'chat:desk' %}">desk</a>
+      {% else %}
+        Live chat off &middot; <a href="{% url 'chat:desk' %}">switch on</a>
+      {% endif %}
+    </div>
+  </div>
 </div>
+
+{% if waiting_chats %}
+  <div class="alert alert-warning">
+    <strong>{{ waiting_chats }}</strong> customer{{ waiting_chats|pluralize }} waiting to chat.
+    <a href="{% url 'chat:desk' %}">Answer now &rarr;</a>
+  </div>
+{% endif %}
 
 <h2>Pending requests</h2>
 {% if pending %}

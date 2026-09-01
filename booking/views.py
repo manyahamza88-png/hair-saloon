@@ -369,6 +369,13 @@ def dashboard(request):
         pending_count=Count("appointments", filter=Q(appointments__status=Appointment.PENDING))
     )
 
+    from chat.models import ChatSettings, Conversation
+
+    chat_settings = ChatSettings.load()
+    chat_status = chat_settings.status()
+    waiting_chats = Conversation.objects.waiting().count()
+    live_chats = Conversation.objects.filter(status=Conversation.STATUS_ACCEPTED).count()
+
     return render(
         request,
         "booking/dashboard.html",
@@ -381,6 +388,10 @@ def dashboard(request):
             "time_off": availability.upcoming_time_off(limit=8),
             "today": today,
             "form": StaffAppointmentForm(),
+            "chat_settings": chat_settings,
+            "chat_status": chat_status,
+            "waiting_chats": waiting_chats,
+            "live_chats": live_chats,
         },
     )
 

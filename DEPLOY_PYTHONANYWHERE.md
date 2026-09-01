@@ -159,6 +159,29 @@ browser and stored encrypted in the database. To verify from a console:
 cd ~/hair-saloon && python3.11 manage.py check_google
 ```
 
+## 8. Live chat (optional)
+
+Nothing to install — but if you switch it on, schedule the transcript purge.
+Chat transcripts are personal data and nothing deletes them without this job.
+
+*Tasks* tab → **Create a scheduled task**, daily:
+
+```
+cd ~/hair-saloon && python3.11 manage.py purge_old_chats
+```
+
+Free accounts get one daily task, which is exactly enough.
+
+Two things to keep an eye on:
+
+- **CPU seconds.** Chat polls over HTTP (PythonAnywhere has no WebSockets on
+  these plans). An open chat window is roughly one small request every
+  5 seconds. If your allowance is tight, raise **Chat settings → poll seconds**.
+- **Leaving it on unattended.** By default chat follows your business hours, so
+  it closes itself when the salon does. If you turn *follow business hours* off,
+  remember to use the switch at `/chat/desk/` — otherwise customers sit watching
+  "waiting for someone to join" with nobody there.
+
 ---
 
 ## Updating later

@@ -1,0 +1,82 @@
+{% load static %}
+{# Floating live-chat bubble. Included from base.html on every customer page. #}
+<div id="chat-widget" class="chat-widget" hidden
+     data-widget-url="{% url 'chat:widget' %}"
+     data-start-url="{% url 'chat:start' %}"
+     data-send-url="{% url 'chat:send' %}"
+     data-dismiss-url="{% url 'chat:dismiss' %}">
+  {% csrf_token %}
+
+  <button type="button" id="chat-fab" class="chat-fab" aria-expanded="false" aria-controls="chat-panel">
+    <span class="chat-fab-icon" aria-hidden="true">&#128172;</span>
+    <span class="chat-fab-label">Chat with us</span>
+    <span id="chat-badge" class="chat-badge" hidden>1</span>
+  </button>
+
+  <section id="chat-panel" class="chat-panel" role="dialog" aria-labelledby="chat-heading" hidden>
+    <header class="chat-header">
+      <div>
+        <strong id="chat-heading">Chat with the salon</strong>
+        <div id="chat-status" class="chat-status">Connecting&hellip;</div>
+      </div>
+      <button type="button" id="chat-minimise" class="chat-x" aria-label="Close chat">&times;</button>
+    </header>
+
+    <!-- offline ---------------------------------------------------------- -->
+    <div class="chat-state" id="chat-state-offline" hidden>
+      <p id="chat-offline-text" class="chat-note"></p>
+      <a class="btn btn-sm" href="{% url 'booking:home' %}">Book online instead</a>
+    </div>
+
+    <!-- start a chat ----------------------------------------------------- -->
+    <div class="chat-state" id="chat-state-no_session" hidden>
+      <p id="chat-welcome" class="chat-note"></p>
+      <form id="chat-start-form" autocomplete="off">
+        <div class="field" id="chat-name-field">
+          <label for="chat-name">Your name</label>
+          <input type="text" id="chat-name" name="name" class="field-input" maxlength="80" placeholder="e.g. Ana">
+        </div>
+        <div class="field">
+          <label for="chat-first-message">How can we help?</label>
+          <textarea id="chat-first-message" name="text" class="field-input" rows="3"
+                    maxlength="2000" placeholder="Ask about a service, a price, or a time&hellip;"></textarea>
+        </div>
+        <button class="btn" type="submit" style="width:100%">Start chat</button>
+      </form>
+    </div>
+
+    <!-- waiting ---------------------------------------------------------- -->
+    <div class="chat-state" id="chat-state-pending" hidden>
+      <div class="chat-waiting">
+        <div class="chat-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+        <p class="chat-note">Waiting for someone to join&hellip;</p>
+        <p class="small muted">We are usually with you in a minute or two. You can keep browsing &mdash; the chat stays open.</p>
+        <button type="button" class="btn btn-sm btn-ghost" data-chat-cancel>Cancel</button>
+      </div>
+    </div>
+
+    <!-- declined --------------------------------------------------------- -->
+    <div class="chat-state" id="chat-state-rejected" hidden>
+      <div id="chat-rejected-text" class="chat-note"></div>
+      <div class="actions">
+        <a class="btn btn-sm" href="{% url 'booking:home' %}">Book online</a>
+        <button type="button" class="btn btn-sm btn-ghost" data-chat-dismiss>Close</button>
+      </div>
+    </div>
+
+    <!-- live ------------------------------------------------------------- -->
+    <div class="chat-state chat-state-live" id="chat-state-accepted" hidden>
+      <div id="chat-log" class="chat-log" aria-live="polite"></div>
+      <form id="chat-send-form" class="chat-composer" autocomplete="off">
+        <textarea id="chat-input" class="field-input" rows="1" maxlength="2000"
+                  placeholder="Write a message&hellip;" aria-label="Message"></textarea>
+        <button class="btn btn-sm" type="submit">Send</button>
+      </form>
+      <button type="button" class="chat-end" data-chat-dismiss>End chat</button>
+    </div>
+
+    <div id="chat-error" class="chat-error" hidden></div>
+  </section>
+</div>
+
+<script src="{% static 'js/chat.js' %}" defer></script>

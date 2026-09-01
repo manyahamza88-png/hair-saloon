@@ -16,6 +16,7 @@ written straight into their Google Calendar.
 - Homepage lists every configured calendar with its next free slot.
 - Pick a service, a day, then a time. Only genuinely free times are shown.
 - Booking confirmation by email, with a self-service cancellation link.
+- Live chat bubble for quick questions, when the salon has it switched on.
 
 **For the salon owner (in `/admin/` and `/manage/google/`)**
 - Link a Google account from the admin panel with a Client ID and Client Secret.
@@ -26,6 +27,7 @@ written straight into their Google Calendar.
 - Approve or decline requests, and re-sync anything Google missed.
 - Booking rules: slot interval, appointment length, turnaround buffer,
   minimum notice, how far ahead people may book, approval on or off.
+- Answer live chats from a staff desk, and switch chat off when nobody is free.
 
 **Google Calendar integration**
 - A pending request lands on the calendar immediately as a *tentative* event,
@@ -149,6 +151,80 @@ It cannot run this app. Google accepts API keys only for *public, read-only*
 calendar data — never for creating events or reading a private calendar,
 whatever scopes are requested. Use the OAuth client above.
 
+## Live chat
+
+A floating chat bubble on every customer page, and a staff desk at
+**`/chat/desk/`** (linked as *Chat* in the header) to answer from.
+
+### Two controls
+
+| Control | Where | What it does |
+| --- | --- | --- |
+| **Switched on** | Desk, or *Admin → Chat settings* | The master switch. Off means no chat at all, whatever the clock says. |
+| **Follow business hours** | *Admin → Chat settings* | When ticked, chat is additionally limited to the salon's opening hours. |
+
+The switch always wins. Ticking *follow business hours* narrows when chat is
+offered; it can never turn chat on while the switch is off.
+
+Chat is **off by default**. With both on — the normal setup — the bubble appears
+by itself when you open and disappears when you close, and you still have the
+switch for "we are slammed, stop the chats" without touching your hours.
+
+Business hours come from the same
+*Admin → Business hours* and *Admin → Time off* rows that drive the booking
+calendar, lunch breaks and vacation included. One place to edit, and chat
+follows. If no hours are configured at all, chat stays available rather than
+silently never appearing.
+
+Two deliberate differences between the two controls:
+
+- **Closing time never cuts a live chat off mid-sentence.** Once a conversation
+  is accepted it can be finished, and only *new* chats are refused after hours.
+- **The switch does close everything**, immediately — that is the point of it.
+
+Outside opening hours the customer is told when you are back ("We are back
+tomorrow at 09:00") rather than just seeing a dead bubble. Whether the bubble
+stays visible at all is *show when offline*.
+
+Transcripts are kept whichever way chat is turned off.
+
+### How a conversation goes
+
+1. The customer clicks the bubble (only shown when chat is available), gives a
+   first name and their question.
+2. The request appears on the staff desk as **waiting**, with the question and
+   the page they were on ("from /book/maria/") so you have context before you
+   answer.
+3. Staff **Accept** — the customer sees a greeting and the chat goes live — or
+   **Too busy**, which sends a polite apology and frees them to book online.
+4. Either side can end the chat. The customer's widget resets.
+
+### Why polling, not WebSockets
+
+PythonAnywhere does not offer WebSockets on the plans a small salon would use,
+so the browser asks for new messages on a timer instead. To keep request counts
+(and CPU seconds) down, the rate adapts: fast while the chat window is open,
+slower when it is closed, backing off further when the tab is hidden or nothing
+has happened for a while. The base interval is **Chat settings → poll seconds**
+(default 5) — raise it if you are watching your CPU allowance.
+
+### Privacy
+
+Chat transcripts are personal data. They are deleted automatically after
+**Chat settings → retention days** (default 365) by:
+
+```bash
+python manage.py purge_old_chats            # honours the configured window
+python manage.py purge_old_chats --dry-run  # show what would go
+```
+
+Run it daily — on PythonAnywhere via the *Tasks* tab. Nothing deletes itself
+without it.
+
+Wording (welcome text, greeting, the busy apology, the offline message) is all
+editable in *Admin → Chat settings*, and full transcripts are readable in
+*Admin → Conversations*.
+
 ## How availability is calculated
 
 A time is offered only when all of these hold:
@@ -180,12 +256,17 @@ booking/services.py            create / confirm / decline / cancel, provisioning
 booking/admin.py               the owner's control panel
 booking/views.py               public pages, JSON slot API, staff dashboard
 booking/tests.py               65 tests, no network access needed
+chat/models.py                 chat settings, conversations, messages
+chat/views.py                  widget + staff desk JSON endpoints
+chat/availability.py           when chat is offered: switch + business hours
+chat/tests.py                  41 tests (availability, isolation, retention)
+static/js/chat.js              the customer widget (adaptive polling)
 ```
 
 ## Tests
 
 ```bash
-python manage.py test booking
+python manage.py test          # 106 tests
 ```
 
 Covers slot generation, breaks, buffers, vacation, per-calendar overrides,
