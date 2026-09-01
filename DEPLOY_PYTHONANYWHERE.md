@@ -186,6 +186,36 @@ Two things to keep an eye on:
 
 ## Updating later
 
+Use the deploy script — it does the whole post-pull sequence and reloads the web
+app for you:
+
+```bash
+cd ~/hair-saloon
+bash deploy.sh --pull
+```
+
+| Flag | Effect |
+| --- | --- |
+| `--pull` | `git pull` before deploying |
+| `--test` | run the test suite before reloading |
+| `--no-reload` | do everything except touch the WSGI file |
+| `--help` | print the usage block |
+
+It installs dependencies (`--user`, or into a virtualenv if one is active),
+applies migrations, collects static files, runs Django's checks and touches the
+WSGI file to reload. Pass `PYTHON=python3.11` to pin the interpreter, or
+`WSGI_FILE=/var/www/<domain>_wsgi.py` if auto-detection cannot find it.
+
+It also warns about the things that quietly break this project: a missing
+`.env`, `DEBUG` still on, an unset `SITE_BASE_URL`, and models that have drifted
+from the committed migrations.
+
+What it deliberately never does: run plain `makemigrations`, touch `db.sqlite3`
+or `media/`, or edit `.env`. Rotating `DJANGO_SECRET_KEY` would invalidate the
+stored Google tokens, so the script leaves it well alone.
+
+The equivalent by hand:
+
 ```bash
 cd ~/hair-saloon
 git pull

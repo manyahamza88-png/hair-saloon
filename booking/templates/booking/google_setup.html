@@ -25,6 +25,109 @@
     <strong>Create credentials &rarr; OAuth client ID &rarr; Web application</strong>.
   </p>
 
+  <details class="guide">
+    <summary>Never done this before? Full step-by-step &mdash; about 10 minutes</summary>
+    <div class="guide-body">
+      <p class="small muted">
+        You are creating a small "app" in Google's developer console that this website
+        uses to talk to your calendar. It is free, and you only do it once.
+        You need a Google account &mdash; ideally <strong>the salon's</strong> account, not a personal one.
+      </p>
+
+      <h4>1. Create a project</h4>
+      <ol>
+        <li>Go to <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a>
+          and sign in with the salon's Google account.</li>
+        <li>Accept the terms if you are asked. You do <strong>not</strong> need to enter a credit card
+          &mdash; calendar access is free.</li>
+        <li>Click the project dropdown in the blue bar at the top &rarr; <strong>New project</strong>.</li>
+        <li>Name it something like <code>Salon Booking</code> and click <strong>Create</strong>.</li>
+        <li>Wait a few seconds, then make sure that project is selected in the dropdown.
+          Everything below must happen inside it.</li>
+      </ol>
+
+      <h4>2. Switch on the Calendar API</h4>
+      <ol>
+        <li>Left menu &rarr; <strong>APIs &amp; Services</strong> &rarr; <strong>Library</strong>.</li>
+        <li>Search for <strong>Google Calendar API</strong> and open it.</li>
+        <li>Click <strong>Enable</strong>.</li>
+      </ol>
+      <p class="small muted">
+        Enable only this one. The salon does not need Gmail, Drive or anything else,
+        and asking for less makes the consent screen simpler.
+      </p>
+
+      <h4>3. Fill in the consent screen</h4>
+      <p class="small muted">This is the "… wants access to your Google Account" page you will see when connecting.</p>
+      <ol>
+        <li><strong>APIs &amp; Services</strong> &rarr; <strong>OAuth consent screen</strong>.</li>
+        <li>Choose <strong>External</strong> and click <strong>Create</strong>.
+          (<em>Internal</em> only exists on Google Workspace accounts; External is right for
+          an ordinary Gmail account.)</li>
+        <li>Fill in the required fields: an <strong>App name</strong> (customers never see it &mdash;
+          "Salon Booking" is fine), a <strong>User support email</strong>, and a
+          <strong>Developer contact email</strong>. Leave the rest empty.</li>
+        <li>Save and continue through <strong>Scopes</strong> without adding anything &mdash;
+          this app requests what it needs at connect time.</li>
+        <li>On <strong>Test users</strong>, click <strong>Add users</strong> and enter every Google
+          address whose calendars you will connect (usually just the salon's).
+          <strong>This step matters:</strong> while the app is unpublished, Google refuses
+          any account that is not on this list with <code>access_denied</code>.</li>
+        <li>Save and continue to the summary.</li>
+      </ol>
+      <p class="small muted">
+        Leaving the app in <em>Testing</em> is fine and needs no review from Google. The only
+        catch is that a connection expires after 7 days, so you would reconnect here weekly.
+        To stop that, press <strong>Publish app</strong> on this screen: for the calendar
+        access used here, publishing takes effect immediately and does not require Google's
+        verification review.
+      </p>
+
+      <h4>4. Create the OAuth client</h4>
+      <ol>
+        <li><strong>APIs &amp; Services</strong> &rarr; <strong>Credentials</strong>
+          &rarr; <strong>Create credentials</strong> &rarr; <strong>OAuth client ID</strong>.</li>
+        <li>Application type: <strong>Web application</strong>. (Not "Desktop" &mdash; this website
+          is the thing signing in.)</li>
+        <li>Give it a name, e.g. <code>Salon website</code>.</li>
+        <li>Under <strong>Authorised redirect URIs</strong>, click <strong>Add URI</strong> and paste
+          exactly this:
+          <div class="guide-uri"><code>{{ callback_url }}</code></div>
+          Nothing else goes in that box. Do not add a redirect URI under
+          "Authorised JavaScript origins" &mdash; it belongs in the redirect list.</li>
+        <li>Click <strong>Create</strong>. Google shows your
+          <strong>Client ID</strong> and <strong>Client secret</strong>.</li>
+        <li>Copy both into the two fields below on this page and press <strong>Save client</strong>.
+          You can always reopen the credential in the console to copy them again.</li>
+      </ol>
+
+      <h4>5. Connect, and you are done</h4>
+      <p class="small muted">
+        Use <strong>Connect a Google account</strong> in step 2 below. Google will warn that the
+        app is not verified &mdash; that is expected for your own app; choose
+        <strong>Advanced</strong> &rarr; <strong>Go to &hellip; (unsafe)</strong> and continue.
+        You are granting access to your own calendar, from your own project.
+      </p>
+
+      <h4>If something goes wrong</h4>
+      <table class="hours-table small">
+        <tr><td><code>redirect_uri_mismatch</code></td>
+            <td>The URI in the console is not character-for-character the one shown above.
+                Watch for a missing trailing slash or <code>http</code> instead of <code>https</code>.</td></tr>
+        <tr><td><code>access_denied</code></td>
+            <td>That Google address is not in <strong>Test users</strong> (step 3), or you clicked Cancel.</td></tr>
+        <tr><td><code>invalid_client</code></td>
+            <td>Client ID or secret was mistyped. Re-copy both and save again.</td></tr>
+        <tr><td>"Google did not return a refresh token"</td>
+            <td>This account already granted access. Remove the app at
+                <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>
+                and connect again.</td></tr>
+        <tr><td>Calendar API not enabled</td>
+            <td>Step 2 was skipped, or you did it in a different project than the one holding the credentials.</td></tr>
+      </table>
+    </div>
+  </details>
+
   <div class="alert alert-info">
     Add this exact <strong>Authorised redirect URI</strong> to that OAuth client:
     <br><code id="cb-url">{{ callback_url }}</code>
@@ -100,6 +203,84 @@
 <!-- Step 3: pick calendars ---------------------------------------------- -->
 <div class="panel">
   <h2 style="margin-top:0">3. Add calendars to the homepage</h2>
+
+  <details class="guide">
+    <summary>How to give each stylist their own calendar &mdash; and put it on the homepage</summary>
+    <div class="guide-body">
+      <p class="small muted">
+        One Google account can hold as many calendars as you like. The usual setup is
+        one calendar per stylist (or per chair, or per room), all owned by the salon's
+        single Google account &mdash; so you only ever connect that one account here,
+        and each stylist still gets their own column in Google Calendar and their own
+        card on the homepage.
+      </p>
+
+      <h4>1. Create the calendar in Google</h4>
+      <ol>
+        <li>Open <a href="https://calendar.google.com/" target="_blank" rel="noopener">calendar.google.com</a>
+          signed in as <strong>{{ credential.oauth_account_email|default:"the account you connected here" }}</strong>.
+          It must be the same account, or it will not show up on this page.</li>
+        <li>In the left sidebar, find <strong>Other calendars</strong> and click the
+          <strong>+</strong> next to it &rarr; <strong>Create new calendar</strong>.</li>
+        <li><strong>Name</strong> it for internal use, e.g. <code>Maria</code> or <code>Chair 2</code>.
+          You can show customers a different name in step 3 below.</li>
+        <li>Set the <strong>Time zone</strong> to the salon's.</li>
+        <li>Click <strong>Create calendar</strong> and wait for the confirmation.</li>
+        <li>Repeat for each stylist.</li>
+      </ol>
+
+      <h4>2. Come back here and refresh</h4>
+      <ol>
+        <li>Reload this page. New calendars appear in the table below within a few
+          seconds &mdash; Google occasionally takes a minute, so reload again if one is missing.</li>
+        <li>You do <strong>not</strong> need to reconnect the account, and you do
+          <strong>not</strong> need to share the calendar with anything: it already belongs
+          to the account you connected, so this site can already see it.</li>
+      </ol>
+
+      <h4>3. Put it on the homepage</h4>
+      <ol>
+        <li>Find the new calendar in the table below.</li>
+        <li>In <strong>Show on the homepage as</strong>, type the name customers should see.
+          This is the public label &mdash; <code>Maria &ndash; Colour &amp; Cuts</code> reads better
+          on a booking page than <code>Maria</code>.</li>
+        <li>Set the address that should receive that calendar's accept / decline emails.
+          Leave it as the salon address, or put the stylist's own address so their
+          bookings go straight to them.</li>
+        <li>Click <strong>Add</strong>. It appears on the homepage immediately.</li>
+      </ol>
+
+      <h4>4. Finish it off (optional, in the admin)</h4>
+      <p class="small muted">
+        Open <a href="/admin/booking/calendar/">Calendars</a> in the admin and edit the new entry to set:
+      </p>
+      <ul class="small muted">
+        <li>a <strong>photo</strong>, <strong>description</strong> and <strong>accent colour</strong> for the homepage card;</li>
+        <li><strong>opening hours</strong> just for this calendar &mdash; leave empty to use the salon's,
+          or add rows so one stylist can work Saturdays when the shop otherwise does not;</li>
+        <li><strong>time off</strong> for that stylist's holidays, separate from salon-wide closures;</li>
+        <li><strong>services</strong> they offer and how long each takes (under
+          <a href="/admin/booking/service/">Services</a>);</li>
+        <li><strong>sort order</strong>, which controls where their card sits on the homepage.</li>
+      </ul>
+
+      <h4>Good to know</h4>
+      <ul class="small muted">
+        <li><strong>Removing a calendar from the site</strong> does not delete anything in Google.
+          Untick <em>is active</em> in the admin to hide the card, or delete the entry here &mdash;
+          the Google calendar and its events stay put.</li>
+        <li><strong>Existing appointments</strong> in a calendar are respected the moment you add it:
+          the free/busy check hides any time that is already taken, so nobody can double-book
+          a stylist who blocked out an afternoon by hand.</li>
+        <li><strong>A calendar you can only read</strong> cannot be added &mdash; this site has to be able
+          to write bookings into it. Create it inside the connected account rather than
+          subscribing to somebody else's.</li>
+        <li><strong>Sharing with the stylist:</strong> in Google Calendar, open that calendar's
+          settings &rarr; <em>Share with specific people</em> and add their address. They then see
+          their bookings in their own Google Calendar without this site needing their account.</li>
+      </ul>
+    </div>
+  </details>
 
   {% if not connected %}
     <div class="empty-state">Connect a Google account above to see its calendars.</div>

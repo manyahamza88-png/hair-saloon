@@ -681,6 +681,37 @@ class GoogleOAuthSetupTests(BaseSalonTest):
         self.assertContains(response, "Connect a Google account first")
         self.assertFalse(Calendar.objects.filter(google_calendar_id="a@x").exists())
 
+    # -- on-page setup instructions ----------------------------------------
+    def test_setup_page_carries_the_cloud_instructions(self):
+        """The Google Cloud walkthrough lives on the page, not just in the docs."""
+        response = self.client.get(reverse("booking:google_setup"))
+        page = response.content.decode()
+        for expected in [
+            "Google Calendar API",      # which API to enable
+            "OAuth consent screen",
+            "Test users",               # the step people skip
+            "Web application",          # the client type that trips people up
+            "redirect_uri_mismatch",    # troubleshooting
+        ]:
+            self.assertIn(expected, page, expected)
+
+    def test_the_guide_shows_the_real_redirect_uri(self):
+        """A wrong URI is the classic failure, so it must be copied, not typed.
+
+        It is shown as https even though the test client speaks http, because
+        that is what Google will be given behind the PythonAnywhere proxy.
+        """
+        response = self.client.get(reverse("booking:google_setup"))
+        page = response.content.decode()
+        callback = reverse("booking:google_callback")
+        self.assertIn(f'<div class="guide-uri"><code>https://testserver{callback}</code></div>', page)
+
+    def test_setup_page_explains_adding_more_calendars(self):
+        response = self.client.get(reverse("booking:google_setup"))
+        page = response.content.decode()
+        for expected in ["Create new calendar", "Other calendars", "Show on the homepage as"]:
+            self.assertIn(expected, page, expected)
+
     # -- the PythonAnywhere proxy quirk ------------------------------------
     def test_callback_url_is_forced_to_https(self):
         from booking.google_oauth import force_https

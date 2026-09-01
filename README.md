@@ -72,6 +72,13 @@ the header and from the dashboard). A superuser pastes a Client ID and Client
 Secret, links a Google account through the browser, and then picks which of that
 account's calendars appear on the homepage.
 
+> **The instructions are built into that page.** It carries two expandable
+> guides — *"Never done this before? Full step-by-step"* for setting up the
+> Google Cloud project, and *"How to give each stylist their own calendar"* for
+> adding more calendars later. Both show the exact redirect URI for your own
+> domain, so the salon owner never has to open this file. The summary below is
+> the same material for reference.
+
 ### 1. Create the OAuth client in Google Cloud
 
 1. <https://console.cloud.google.com/> → create a project.
@@ -261,6 +268,7 @@ chat/views.py                  widget + staff desk JSON endpoints
 chat/availability.py           when chat is offered: switch + business hours
 chat/tests.py                  41 tests (availability, isolation, retention)
 static/js/chat.js              the customer widget (adaptive polling)
+deploy.sh                      one-command deploy + reload on PythonAnywhere
 ```
 
 ## Tests
@@ -280,4 +288,10 @@ API client.
 
 ## Deployment
 
-See [DEPLOY_PYTHONANYWHERE.md](DEPLOY_PYTHONANYWHERE.md).
+See [DEPLOY_PYTHONANYWHERE.md](DEPLOY_PYTHONANYWHERE.md) for the full walkthrough.
+
+Once it is set up, updates are one command on the server:
+
+```bash
+bash deploy.sh --pull        # pull, install, migrate, collectstatic, check, reload
+```

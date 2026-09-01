@@ -301,3 +301,38 @@ details.adder > summary { cursor: pointer; font-weight: 600; padding: .5rem 0; }
 .chat-dot-live { background: var(--ok); box-shadow: 0 0 0 3px rgba(21, 128, 61, .16); }
 .chat-dot-waiting { background: var(--warn); box-shadow: 0 0 0 3px rgba(180, 83, 9, .16); }
 .chat-dot-off { background: var(--ink-soft); box-shadow: 0 0 0 3px rgba(107, 114, 128, .14); }
+
+/* ---------- in-admin guides ---------- */
+details.guide {
+  border: 1px solid var(--line); border-radius: 10px;
+  background: #fcfaf7; margin: .9rem 0;
+}
+details.guide > summary {
+  cursor: pointer; padding: .7rem .9rem;
+  font-size: .9rem; font-weight: 600; color: var(--accent-dark);
+  list-style: none;
+}
+details.guide > summary::-webkit-details-marker { display: none; }
+details.guide > summary::before { content: "▸ "; display: inline-block; width: 1em; }
+details.guide[open] > summary::before { content: "▾ "; }
+details.guide[open] > summary { border-bottom: 1px solid var(--line); }
+.guide-body { padding: .3rem 1.1rem 1rem; font-size: .9rem; }
+.guide-body h4 {
+  margin: 1.1rem 0 .35rem; font-size: .9rem; color: var(--ink);
+  padding-top: .5rem; border-top: 1px dashed var(--line);
+}
+.guide-body h4:first-of-type { border-top: none; padding-top: 0; margin-top: .6rem; }
+.guide-body ol, .guide-body ul { margin: .3rem 0; padding-left: 1.3rem; }
+.guide-body li { margin-bottom: .3rem; }
+.guide-body code {
+  background: #f1e9df; padding: .08rem .3rem; border-radius: 4px;
+  font-size: .86em; word-break: break-all;
+}
+.guide-uri {
+  margin: .45rem 0; padding: .5rem .7rem;
+  background: var(--card); border: 1px dashed var(--accent);
+  border-radius: 8px; word-break: break-all;
+}
+.guide-body table.hours-table td { vertical-align: top; padding: .4rem .5rem .4rem 0; }
+.guide-body table.hours-table td:first-child { white-space: nowrap; padding-right: .9rem; }
+.guide-body table.hours-table td:last-child { text-align: left; }
