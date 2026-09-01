@@ -1,0 +1,27 @@
+{% extends "emails/_base_email.html" %}
+
+{% block heading %}About your booking request{% endblock %}
+
+{% block body %}
+  <p style="margin:0 0 16px">
+    Hi {{ appointment.customer_name }}, unfortunately {{ calendar.name }} cannot take
+    your appointment on <strong>{{ start|date:"l j F Y" }} at {{ start|date:"H:i" }}</strong>.
+  </p>
+
+  {% if appointment.decision_note %}
+    <div style="margin:0 0 18px;padding:12px 14px;background:#f6f2ed;border-radius:10px;font-size:14px">
+      <strong>A message from {{ calendar.name }}:</strong><br>
+      {{ appointment.decision_note|linebreaksbr }}
+    </div>
+  {% endif %}
+
+  <p style="margin:0 0 20px">
+    Nothing has been charged. You are very welcome to pick another time.
+  </p>
+
+  <a href="{{ site_url }}"
+     style="display:inline-block;background:#b0855b;color:#ffffff;text-decoration:none;
+            padding:12px 26px;border-radius:999px;font-weight:600;font-size:15px">
+    Find another time
+  </a>
+{% endblock %}

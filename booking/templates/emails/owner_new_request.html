@@ -1,0 +1,52 @@
+{% extends "emails/_base_email.html" %}
+
+{% block heading %}{% if needs_approval %}New booking request{% else %}New booking{% endif %}{% endblock %}
+
+{% block body %}
+  <p style="margin:0 0 16px">
+    {% if needs_approval %}
+      <strong>{{ appointment.customer_name }}</strong> would like an appointment with
+      <strong>{{ calendar.name }}</strong>. The slot is held in your Google Calendar as
+      <em>tentative</em> until you answer.
+    {% else %}
+      <strong>{{ appointment.customer_name }}</strong> booked an appointment with
+      <strong>{{ calendar.name }}</strong>. It is already on your Google Calendar.
+    {% endif %}
+  </p>
+
+  {% include "emails/_details.html" %}
+
+  {% if needs_approval %}
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0">
+      <tr>
+        <td style="padding-right:10px">
+          <a href="{{ accept_url }}"
+             style="display:inline-block;background:#15803d;color:#ffffff;text-decoration:none;
+                    padding:12px 26px;border-radius:999px;font-weight:600;font-size:15px">
+            Accept
+          </a>
+        </td>
+        <td>
+          <a href="{{ decline_url }}"
+             style="display:inline-block;background:#ffffff;color:#b91c1c;text-decoration:none;
+                    padding:12px 26px;border-radius:999px;font-weight:600;font-size:15px;
+                    border:1px solid #b91c1c">
+            Decline
+          </a>
+        </td>
+      </tr>
+    </table>
+    <p style="margin:0 0 8px;font-size:13px;color:#6b615a">
+      Both buttons open a confirmation page first, so nothing changes by accident.
+      The links stay valid for {{ link_valid_days }} days.
+    </p>
+  {% else %}
+    <p style="margin:20px 0 8px">
+      <a href="{{ cancel_url }}" style="color:#b91c1c">Cancel this appointment</a>
+    </p>
+  {% endif %}
+
+  <p style="margin:16px 0 0;font-size:13px;color:#6b615a">
+    <a href="{{ appointment_url }}" style="color:#8a663f">Open the booking details</a>
+  </p>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Cancel appointment - {{ salon.name }}{% endblock %}
+
+{% block content %}
+<div class="panel center-card">
+  <h1>Cancel this appointment?</h1>
+
+  {% if not appointment.is_open %}
+    <div class="alert alert-info">
+      This appointment is already {{ appointment.get_status_display|lower }}. Nothing to cancel.
+    </div>
+    <div class="actions"><a class="btn" href="{% url 'booking:home' %}">Book a new time</a></div>
+  {% else %}
+    <div class="summary-line"><span>When</span><span>{{ appointment.local_start|date:"l j F Y, H:i" }}</span></div>
+    <div class="summary-line"><span>With</span><span>{{ appointment.calendar.name }}</span></div>
+    <div class="summary-line"><span>Service</span><span>{{ appointment.service_name }}</span></div>
+
+    <form method="post" style="margin-top:1.2rem">
+      {% csrf_token %}
+      <div class="field">
+        {{ form.reason.label_tag }}
+        {{ form.reason }}
+      </div>
+      <div class="actions">
+        <button class="btn btn-danger" type="submit">Yes, cancel it</button>
+        <a class="btn btn-ghost" href="{{ appointment.get_absolute_url }}">Keep my appointment</a>
+      </div>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

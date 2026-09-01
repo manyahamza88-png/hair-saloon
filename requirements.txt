@@ -1,0 +1,12 @@
+# Core
+Django>=5.0,<6.2
+whitenoise>=6.6            # serves static files without extra web-server config
+Pillow>=10.0               # calendar photos (ImageField)
+
+# Google Calendar integration
+google-api-python-client>=2.120
+google-auth>=2.28
+google-auth-oauthlib>=1.2  # only needed for `manage.py connect_google`
+
+# Optional: MySQL on PythonAnywhere (uncomment if you switch off SQLite)
+# mysqlclient>=2.2

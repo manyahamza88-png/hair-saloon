@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - {{ salon.name }}{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+<p class="lede">
+  Approve today's requests here. Calendars, opening hours and vacation live in the
+  <a href="/admin/">admin</a>.
+</p>
+
+<div class="stat-row">
+  <div class="stat"><div class="n">{{ pending|length }}</div><div class="l">Awaiting your answer</div></div>
+  <div class="stat"><div class="n">{{ todays|length }}</div><div class="l">In the shop today</div></div>
+  <div class="stat"><div class="n">{{ upcoming|length }}</div><div class="l">Confirmed upcoming</div></div>
+  <div class="stat"><div class="n">{{ calendars|length }}</div><div class="l">Calendars</div></div>
+</div>
+
+<h2>Pending requests</h2>
+{% if pending %}
+  <div class="table-wrap">
+    <table class="list">
+      <tr>
+        <th>When</th><th>Customer</th><th>Calendar</th><th>Service</th><th>Google</th><th style="width:230px">Action</th>
+      </tr>
+      {% for appointment in pending %}
+        <tr>
+          <td><strong>{{ appointment.local_start|date:"D j M, H:i" }}</strong><div class="small muted">to {{ appointment.local_end|date:"H:i" }}</div></td>
+          <td>
+            {{ appointment.customer_name }}
+            <div class="small muted">{{ appointment.customer_email }}{% if appointment.customer_phone %} &middot; {{ appointment.customer_phone }}{% endif %}</div>
+            {% if appointment.notes %}<div class="small">&ldquo;{{ appointment.notes|truncatechars:90 }}&rdquo;</div>{% endif %}
+          </td>
+          <td>{{ appointment.calendar.name }}</td>
+          <td>{{ appointment.service_name }}</td>
+          <td class="small">
+            {% if appointment.google_sync_error %}
+              <span style="color:#b91c1c" title="{{ appointment.google_sync_error }}">error</span>
+            {% elif appointment.google_event_id %}<span style="color:#15803d">held</span>
+            {% else %}<span class="muted">&mdash;</span>{% endif %}
+          </td>
+          <td>
+            <form class="inline-form" method="post" action="{% url 'booking:dashboard_decide' appointment.public_id %}">
+              {% csrf_token %}
+              <button class="btn btn-sm" name="action" value="accept">Accept</button>
+            </form>
+            <form class="inline-form" method="post" action="{% url 'booking:dashboard_decide' appointment.public_id %}">
+              {% csrf_token %}
+              <button class="btn btn-sm btn-ghost" name="action" value="decline">Decline</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
+{% else %}
+  <div class="empty-state">Nothing waiting. Everything is answered.</div>
+{% endif %}
+
+<h2>Today &mdash; {{ today|date:"l j F" }}</h2>
+{% if todays %}
+  <div class="table-wrap">
+    <table class="list">
+      <tr><th>Time</th><th>Customer</th><th>Calendar</th><th>Status</th><th></th></tr>
+      {% for appointment in todays %}
+        <tr>
+          <td><strong>{{ appointment.local_start|date:"H:i" }}</strong> &ndash; {{ appointment.local_end|date:"H:i" }}</td>
+          <td>{{ appointment.customer_name }}<div class="small muted">{{ appointment.service_name }}</div></td>
+          <td>{{ appointment.calendar.name }}</td>
+          <td><span class="badge badge-{{ appointment.status }}">{{ appointment.get_status_display }}</span></td>
+          <td>
+            <form class="inline-form" method="post" action="{% url 'booking:dashboard_decide' appointment.public_id %}">
+              {% csrf_token %}
+              <button class="btn btn-sm btn-ghost" name="action" value="cancel">Cancel</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
+{% else %}
+  <div class="empty-state">No appointments today.</div>
+{% endif %}
+
+<h2>Next confirmed appointments</h2>
+{% if upcoming %}
+  <div class="table-wrap">
+    <table class="list">
+      <tr><th>When</th><th>Customer</th><th>Calendar</th><th>Google</th><th></th></tr>
+      {% for appointment in upcoming %}
+        <tr>
+          <td>{{ appointment.local_start|date:"D j M, H:i" }}</td>
+          <td>{{ appointment.customer_name }}<div class="small muted">{{ appointment.customer_email }}</div></td>
+          <td>{{ appointment.calendar.name }}</td>
+          <td class="small">
+            {% if appointment.google_sync_error %}
+              <span style="color:#b91c1c" title="{{ appointment.google_sync_error }}">error</span>
+            {% elif appointment.google_event_id %}<span style="color:#15803d">synced</span>
+            {% else %}<span class="muted">&mdash;</span>{% endif %}
+          </td>
+          <td>
+            <form class="inline-form" method="post" action="{% url 'booking:dashboard_decide' appointment.public_id %}">
+              {% csrf_token %}
+              <button class="btn btn-sm btn-ghost" name="action" value="resync">Re-sync</button>
+            </form>
+            <form class="inline-form" method="post" action="{% url 'booking:dashboard_decide' appointment.public_id %}">
+              {% csrf_token %}
+              <button class="btn btn-sm btn-ghost" name="action" value="cancel">Cancel</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
+{% else %}
+  <div class="empty-state">No confirmed appointments coming up.</div>
+{% endif %}
+
+<details class="adder">
+  <summary>Add an appointment manually (phone booking, or block out time)</summary>
+  <form method="post" action="{% url 'booking:dashboard_add' %}" class="panel" style="margin-top:.6rem">
+    {% csrf_token %}
+    <div class="form-grid">
+      {% for field in form %}
+        <div class="field">
+          {{ field.label_tag }}
+          {{ field }}
+          {% if field.errors %}{{ field.errors }}{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+    <button class="btn" type="submit">Save appointment</button>
+    <p class="help">To block time out for a whole day or a holiday, use <a href="/admin/booking/timeoff/add/">Time off</a> instead.</p>
+  </form>
+</details>
+
+<div class="two-col" style="margin-top:2rem">
+  <div class="panel">
+    <h3>Calendars</h3>
+    <table class="hours-table">
+      {% for calendar in calendars %}
+        <tr>
+          <td>
+            <a href="/admin/booking/calendar/{{ calendar.pk }}/change/">{{ calendar.name }}</a>
+            <div class="small muted">{{ calendar.owner_email }}</div>
+            {% if calendar.last_sync_error %}<div class="small" style="color:#b91c1c">{{ calendar.last_sync_error|truncatechars:80 }}</div>{% endif %}
+          </td>
+          <td>
+            {% if calendar.is_active %}<span class="badge badge-confirmed">live</span>{% else %}<span class="badge badge-cancelled">hidden</span>{% endif %}
+            {% if calendar.pending_count %}<div class="small" style="color:#b45309">{{ calendar.pending_count }} pending</div>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+    <p style="margin-top:.9rem"><a class="btn btn-sm btn-ghost" href="/admin/booking/calendar/add/">Add a calendar</a></p>
+  </div>
+
+  <div class="panel">
+    <h3>Upcoming time off</h3>
+    {% if time_off %}
+      <table class="hours-table">
+        {% for entry in time_off %}
+          <tr>
+            <td>{{ entry.start_date|date:"j M" }}{% if entry.end_date != entry.start_date %}&ndash;{{ entry.end_date|date:"j M" }}{% endif %}
+              <div class="small muted">{{ entry.reason|default:"Closed" }}</div>
+            </td>
+            <td class="small">{% if entry.calendar %}{{ entry.calendar.name }}{% else %}Whole salon{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </table>
+    {% else %}
+      <p class="muted small">No vacation booked.</p>
+    {% endif %}
+    <p style="margin-top:.9rem">
+      <a class="btn btn-sm btn-ghost" href="/admin/booking/timeoff/add/">Mark vacation</a>
+      <a class="btn btn-sm btn-ghost" href="/admin/booking/businesshours/">Opening hours</a>
+    </p>
+  </div>
+</div>
+{% endblock %}

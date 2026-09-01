@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Your booking - {{ salon.name }}{% endblock %}
+
+{% block content %}
+<div class="panel center-card">
+  <h1>Your booking</h1>
+  <p class="lede">
+    <span class="badge badge-{{ appointment.status }}">{{ appointment.get_status_display }}</span>
+    {% if appointment.status == 'pending' %}
+      &mdash; waiting for {{ appointment.calendar.name }} to accept.
+    {% elif appointment.status == 'confirmed' %}
+      &mdash; we look forward to seeing you.
+    {% elif appointment.status == 'declined' %}
+      &mdash; unfortunately this time could not be taken.
+    {% else %}
+      &mdash; this appointment was cancelled.
+    {% endif %}
+  </p>
+
+  <div class="summary-line"><span>When</span><span>{{ appointment.local_start|date:"l j F Y, H:i" }} &ndash; {{ appointment.local_end|date:"H:i" }}</span></div>
+  <div class="summary-line"><span>With</span><span>{{ appointment.calendar.name }}</span></div>
+  <div class="summary-line"><span>Service</span><span>{{ appointment.service_name }} ({{ appointment.duration_minutes }} min)</span></div>
+  <div class="summary-line"><span>Name</span><span>{{ appointment.customer_name }}</span></div>
+  <div class="summary-line"><span>Email</span><span>{{ appointment.customer_email }}</span></div>
+  {% if appointment.customer_phone %}<div class="summary-line"><span>Phone</span><span>{{ appointment.customer_phone }}</span></div>{% endif %}
+  {% if appointment.notes %}<div class="summary-line"><span>Notes</span><span>{{ appointment.notes }}</span></div>{% endif %}
+  {% if salon.address %}<div class="summary-line"><span>Where</span><span>{{ salon.address }}</span></div>{% endif %}
+
+  {% if appointment.decision_note %}
+    <div class="alert alert-info" style="margin-top:1rem">
+      <strong>Message from {{ appointment.calendar.name }}:</strong><br>{{ appointment.decision_note|linebreaksbr }}
+    </div>
+  {% endif %}
+
+  <div class="actions">
+    {% if appointment.is_open and not appointment.is_past %}
+      <a class="btn btn-danger" href="{{ cancel_url }}">Cancel this appointment</a>
+    {% endif %}
+    <a class="btn btn-ghost" href="{% url 'booking:home' %}">Book another time</a>
+  </div>
+</div>
+{% endblock %}

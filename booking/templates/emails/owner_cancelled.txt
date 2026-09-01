@@ -1,0 +1,15 @@
+{% autoescape off %}A customer cancelled their appointment on {{ calendar.name }}.
+
+  When:     {{ start|date:"l j F Y, H:i" }} - {{ end|date:"H:i" }}
+  Service:  {{ appointment.service_name }}
+  Customer: {{ appointment.customer_name }} ({{ appointment.customer_email }})
+{% if appointment.decision_note %}  Reason:   {{ appointment.decision_note }}
+{% endif %}
+The slot is free again and the event has been removed from Google Calendar.
+
+Booking details: {{ appointment_url }}
+
+--
+{{ salon.name }}
+{{ site_url }}
+{% endautoescape %}

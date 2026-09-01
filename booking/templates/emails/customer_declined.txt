@@ -1,0 +1,16 @@
+{% autoescape off %}Hi {{ appointment.customer_name }},
+
+Unfortunately {{ calendar.name }} cannot take your appointment on
+{{ start|date:"l j F Y" }} at {{ start|date:"H:i" }}.
+
+{% if appointment.decision_note %}A message from {{ calendar.name }}:
+  {{ appointment.decision_note }}
+
+{% endif %}Nothing has been charged and the time is free again. You are very welcome to
+pick another slot here:
+
+{{ site_url }}
+
+--
+{{ salon.name }}{% if salon.phone %} - {{ salon.phone }}{% endif %}
+{% endautoescape %}

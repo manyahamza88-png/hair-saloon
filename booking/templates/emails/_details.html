@@ -1,0 +1,39 @@
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%"
+       style="border-collapse:collapse;font-size:14px">
+  <tr>
+    <td style="padding:7px 0;border-bottom:1px dashed #e6ddd3;color:#6b615a;width:36%">When</td>
+    <td style="padding:7px 0;border-bottom:1px dashed #e6ddd3;font-weight:600">
+      {{ start|date:"l j F Y, H:i" }} &ndash; {{ end|date:"H:i" }}
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:7px 0;border-bottom:1px dashed #e6ddd3;color:#6b615a">Calendar</td>
+    <td style="padding:7px 0;border-bottom:1px dashed #e6ddd3">{{ calendar.name }}</td>
+  </tr>
+  <tr>
+    <td style="padding:7px 0;border-bottom:1px dashed #e6ddd3;color:#6b615a">Service</td>
+    <td style="padding:7px 0;border-bottom:1px dashed #e6ddd3">
+      {{ appointment.service_name }} ({{ appointment.duration_minutes }} min)
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:7px 0;border-bottom:1px dashed #e6ddd3;color:#6b615a">Customer</td>
+    <td style="padding:7px 0;border-bottom:1px dashed #e6ddd3">
+      {{ appointment.customer_name }}<br>
+      <a href="mailto:{{ appointment.customer_email }}" style="color:#8a663f">{{ appointment.customer_email }}</a>
+      {% if appointment.customer_phone %}<br>{{ appointment.customer_phone }}{% endif %}
+    </td>
+  </tr>
+  {% if appointment.notes %}
+    <tr>
+      <td style="padding:7px 0;border-bottom:1px dashed #e6ddd3;color:#6b615a">Notes</td>
+      <td style="padding:7px 0;border-bottom:1px dashed #e6ddd3">{{ appointment.notes|linebreaksbr }}</td>
+    </tr>
+  {% endif %}
+  {% if salon.address %}
+    <tr>
+      <td style="padding:7px 0;color:#6b615a">Where</td>
+      <td style="padding:7px 0">{{ salon.address }}</td>
+    </tr>
+  {% endif %}
+</table>

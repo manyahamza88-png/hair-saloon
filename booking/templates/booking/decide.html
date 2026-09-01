@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}{% if is_accept %}Accept{% else %}Decline{% endif %} booking - {{ salon.name }}{% endblock %}
+
+{% block content %}
+<div class="panel center-card">
+  <h1>{% if is_accept %}Accept this booking?{% else %}Decline this booking?{% endif %}</h1>
+
+  {% if already_decided %}
+    <div class="alert alert-warning">
+      This request is already marked as <strong>{{ appointment.get_status_display|lower }}</strong>.
+      You can still {% if is_accept %}accept{% else %}decline{% endif %} it, which will overwrite that
+      and email the customer again.
+    </div>
+  {% endif %}
+
+  <div class="summary-line"><span>When</span><span>{{ appointment.local_start|date:"l j F Y, H:i" }} &ndash; {{ appointment.local_end|date:"H:i" }}</span></div>
+  <div class="summary-line"><span>Calendar</span><span>{{ appointment.calendar.name }}</span></div>
+  <div class="summary-line"><span>Service</span><span>{{ appointment.service_name }} ({{ appointment.duration_minutes }} min)</span></div>
+  <div class="summary-line"><span>Customer</span><span>{{ appointment.customer_name }}</span></div>
+  <div class="summary-line"><span>Email</span><span>{{ appointment.customer_email }}</span></div>
+  {% if appointment.customer_phone %}<div class="summary-line"><span>Phone</span><span>{{ appointment.customer_phone }}</span></div>{% endif %}
+  {% if appointment.notes %}<div class="summary-line"><span>Notes</span><span>{{ appointment.notes }}</span></div>{% endif %}
+
+  <form method="post" style="margin-top:1.2rem">
+    {% csrf_token %}
+    <div class="field">
+      {{ form.note.label_tag }}
+      {{ form.note }}
+      <p class="help">
+        {% if is_accept %}
+          Added to the confirmation email, e.g. "Please arrive five minutes early".
+        {% else %}
+          Added to the email, e.g. "Sorry, fully booked - would 16:00 work instead?".
+        {% endif %}
+      </p>
+    </div>
+
+    <div class="actions">
+      <button class="btn {% if not is_accept %}btn-danger{% endif %}" type="submit">
+        {% if is_accept %}Yes, accept and confirm{% else %}Yes, decline{% endif %}
+      </button>
+      <a class="btn btn-ghost" href="{% url 'booking:dashboard' %}">Open the dashboard instead</a>
+    </div>
+  </form>
+
+  <p class="help" style="margin-top:1rem">
+    {% if is_accept %}
+      Accepting adds the event to <strong>{{ appointment.calendar.name }}</strong> in Google Calendar,
+      invites the customer, and emails them the confirmation.
+    {% else %}
+      Declining removes the tentative hold from Google Calendar and frees the slot for someone else.
+    {% endif %}
+  </p>
+</div>
+{% endblock %}

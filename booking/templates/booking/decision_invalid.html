@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Link expired - {{ salon.name }}{% endblock %}
+
+{% block content %}
+<div class="panel center-card">
+  <div class="big-icon">&#8987;</div>
+  <h1>This link has expired</h1>
+  <p class="lede">
+    Accept and decline links stay valid for a limited time. Nothing has been changed.
+  </p>
+  <div class="actions">
+    <a class="btn" href="{% url 'booking:dashboard' %}">Open the dashboard</a>
+    <a class="btn btn-ghost" href="{% url 'booking:home' %}">Salon homepage</a>
+  </div>
+</div>
+{% endblock %}

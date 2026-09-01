@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Done - {{ salon.name }}{% endblock %}
+
+{% block content %}
+<div class="panel center-card">
+  <div class="big-icon">{% if appointment.status == 'confirmed' %}&#10003;{% else %}&#10005;{% endif %}</div>
+  <h1>
+    {% if appointment.status == 'confirmed' %}Booking accepted{% else %}Booking declined{% endif %}
+  </h1>
+  <p class="lede">
+    {{ appointment.customer_name }} has been emailed,
+    {% if appointment.status == 'confirmed' %}
+      and the appointment is on {{ appointment.calendar.name }}'s Google Calendar.
+    {% else %}
+      and the slot is free again.
+    {% endif %}
+  </p>
+
+  <div class="summary-line"><span>When</span><span>{{ appointment.local_start|date:"l j F Y, H:i" }}</span></div>
+  <div class="summary-line"><span>Calendar</span><span>{{ appointment.calendar.name }}</span></div>
+  <div class="summary-line"><span>Status</span><span class="badge badge-{{ appointment.status }}">{{ appointment.get_status_display }}</span></div>
+
+  {% if appointment.google_sync_error %}
+    <div class="alert alert-warning" style="margin-top:1rem">
+      <strong>Google Calendar could not be updated:</strong><br>
+      {{ appointment.google_sync_error }}
+      <br><span class="small">The booking itself is saved. Use "Re-sync" on the dashboard once this is fixed.</span>
+    </div>
+  {% endif %}
+
+  <div class="actions">
+    <a class="btn" href="{% url 'booking:dashboard' %}">Go to the dashboard</a>
+    <a class="btn btn-ghost" href="{% url 'booking:home' %}">Salon homepage</a>
+  </div>
+</div>
+{% endblock %}

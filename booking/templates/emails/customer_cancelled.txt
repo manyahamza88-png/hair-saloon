@@ -1,0 +1,14 @@
+{% autoescape off %}Hi {{ appointment.customer_name }},
+
+Your appointment at {{ salon.name }} on {{ start|date:"l j F Y" }} at
+{{ start|date:"H:i" }} with {{ calendar.name }} has been cancelled.
+
+{% if appointment.decision_note %}Reason:
+  {{ appointment.decision_note }}
+
+{% endif %}You can book a new time here:
+{{ site_url }}
+
+--
+{{ salon.name }}{% if salon.phone %} - {{ salon.phone }}{% endif %}
+{% endautoescape %}

@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block title %}Book with {{ calendar.name }} - {{ salon.name }}{% endblock %}
+
+{% block content %}
+<p class="small"><a href="{% url 'booking:home' %}">&larr; All calendars</a></p>
+<h1>{{ calendar.name }}</h1>
+<p class="lede">
+  {% if calendar.description %}{{ calendar.description }}{% else %}Pick a day and a time that suits you.{% endif %}
+</p>
+
+<div class="booking-grid">
+  <div>
+    <!-- Step 1: service ------------------------------------------------- -->
+    {% if services %}
+      <div class="panel" style="margin-bottom:1.2rem">
+        <h3>1. Choose a service</h3>
+        <form method="get" id="service-form">
+          <input type="hidden" name="date" value="{{ selected_day|date:'Y-m-d' }}">
+          <select name="service" onchange="document.getElementById('service-form').submit()">
+            <option value="">Standard appointment ({{ calendar.duration_minutes }} min)</option>
+            {% for service in services %}
+              <option value="{{ service.pk }}" {% if selected_service and selected_service.pk == service.pk %}selected{% endif %}>
+                {{ service.name }} &middot; {{ service.duration_minutes }} min{% if service.price %} &middot; {{ service.price }}{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <noscript><button class="btn btn-sm" type="submit" style="margin-top:.6rem">Apply</button></noscript>
+        </form>
+      </div>
+    {% endif %}
+
+    <!-- Step 2: day ------------------------------------------------------ -->
+    <div class="panel" style="margin-bottom:1.2rem">
+      <h3>{% if services %}2{% else %}1{% endif %}. Choose a day</h3>
+
+      {% if day_strip %}
+        <div class="day-strip">
+          {% for day in day_strip %}
+            <a class="day-chip {% if day.is_selected %}is-selected{% endif %} {% if not day.count %}is-full{% endif %}"
+               href="?date={{ day.date|date:'Y-m-d' }}{% if selected_service %}&service={{ selected_service.pk }}{% endif %}">
+              <span class="dow">{{ day.date|date:"D" }}</span>
+              <span class="dom">{{ day.date|date:"j" }}</span>
+              <span class="free">{% if day.count %}{{ day.count }} free{% else %}&mdash;{% endif %}</span>
+            </a>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <form method="get" class="small" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        {% if selected_service %}<input type="hidden" name="service" value="{{ selected_service.pk }}">{% endif %}
+        <label for="date-picker" style="font-weight:600">Or jump to a date:</label>
+        <input type="date" id="date-picker" name="date"
+               value="{{ selected_day|date:'Y-m-d' }}"
+               min="{{ today|date:'Y-m-d' }}" max="{{ max_date|date:'Y-m-d' }}"
+               style="width:auto" onchange="this.form.submit()">
+        <noscript><button class="btn btn-sm" type="submit">Go</button></noscript>
+      </form>
+    </div>
+
+    <!-- Step 3: time ----------------------------------------------------- -->
+    <div class="panel">
+      <h3>{% if services %}3{% else %}2{% endif %}. Choose a time
+        <span class="muted small" style="font-weight:400">&mdash; {{ selected_day|date:"l j F Y" }}</span>
+      </h3>
+
+      {% if slots %}
+        <div class="slot-grid" id="slot-grid">
+          {% for slot in slots %}
+            <button type="button" class="slot" data-start="{{ slot.start|date:'c' }}"
+                    data-label="{{ slot.start|date:'l j F, H:i' }}"
+                    data-end="{{ slot.end|date:'H:i' }}">{{ slot.label }}</button>
+          {% endfor %}
+        </div>
+        <p class="help" style="margin-top:.8rem">Each appointment lasts {{ duration }} minutes.</p>
+      {% else %}
+        <div class="empty-state">
+          <p>No free times on {{ selected_day|date:"j F" }}.</p>
+          <p class="small">Try another day above.</p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Step 4: details ---------------------------------------------------- -->
+  <div class="sticky">
+    <div class="panel">
+      <h3>Your details</h3>
+
+      <div id="chosen-slot" class="alert alert-info" style="display:none">
+        <strong id="chosen-slot-text"></strong>
+      </div>
+      <p id="no-slot" class="help">Pick a time on the left to continue.</p>
+
+      <form method="post" action="{% url 'booking:book' calendar.slug %}" id="booking-form">
+        {% csrf_token %}
+        {{ form.start }}
+        {{ form.website }}
+
+        {% if form.non_field_errors %}
+          <div class="alert alert-error">{{ form.non_field_errors|join:" " }}</div>
+        {% endif %}
+
+        {% if services %}
+          <div class="field">
+            {{ form.service.label_tag }}
+            {{ form.service }}
+            {{ form.service.errors }}
+          </div>
+        {% else %}
+          {{ form.service }}
+        {% endif %}
+
+        {% for field in form %}
+          {% if field.name in "customer_name,customer_email,customer_phone,notes" %}
+            <div class="field">
+              {{ field.label_tag }}
+              {{ field }}
+              {{ field.errors }}
+            </div>
+          {% endif %}
+        {% endfor %}
+
+        <button class="btn" type="submit" id="submit-btn" disabled style="width:100%">
+          Request this appointment
+        </button>
+
+        <p class="help" style="margin-top:.7rem">
+          {% if salon.require_approval %}
+            {{ calendar.name }} will accept or decline by email, and you will hear back from us shortly.
+          {% else %}
+            You will receive a confirmation email straight away.
+          {% endif %}
+        </p>
+        {% if salon.booking_terms %}
+          <p class="help">{{ salon.booking_terms|linebreaksbr }}</p>
+        {% endif %}
+      </form>
+    </div>
+
+    <div class="panel" style="margin-top:1.2rem">
+      <h3>Opening hours</h3>
+      <table class="hours-table">
+        {% for row in schedule %}
+          <tr class="{% if row.is_today %}today{% endif %}">
+            <td>{{ row.label }}</td>
+            <td>{% if row.closed %}Closed{% else %}{{ row.hours.opens_at|time:"H:i" }}&ndash;{{ row.hours.closes_at|time:"H:i" }}{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </table>
+      {% if time_off %}
+        <p class="small muted" style="margin:.8rem 0 0">
+          Away:
+          {% for entry in time_off %}
+            {{ entry.start_date|date:"j M" }}{% if entry.end_date != entry.start_date %}&ndash;{{ entry.end_date|date:"j M" }}{% endif %}{% if not forloop.last %}, {% endif %}
+          {% endfor %}
+        </p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var grid = document.getElementById('slot-grid');
+  var startField = document.getElementById('id_start');
+  var submitBtn = document.getElementById('submit-btn');
+  var chosen = document.getElementById('chosen-slot');
+  var chosenText = document.getElementById('chosen-slot-text');
+  var noSlot = document.getElementById('no-slot');
+  if (!grid || !startField) return;
+
+  grid.addEventListener('click', function (event) {
+    var button = event.target.closest('.slot');
+    if (!button) return;
+    grid.querySelectorAll('.slot').forEach(function (el) { el.classList.remove('is-active'); });
+    button.classList.add('is-active');
+    startField.value = button.dataset.start;
+    chosenText.textContent = button.dataset.label + ' – ' + button.dataset.end;
+    chosen.style.display = '';
+    noSlot.style.display = 'none';
+    submitBtn.disabled = false;
+    if (window.matchMedia('(max-width: 900px)').matches) {
+      document.getElementById('booking-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
+
+  // Restore the selection after a failed submit.
+  if (startField.value) {
+    var match = grid.querySelector('.slot[data-start="' + startField.value + '"]');
+    if (match) match.click();
+  }
+})();
+</script>
+{% endblock %}

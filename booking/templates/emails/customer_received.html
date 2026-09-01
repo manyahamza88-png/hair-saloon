@@ -1,0 +1,19 @@
+{% extends "emails/_base_email.html" %}
+
+{% block heading %}We received your request{% endblock %}
+
+{% block body %}
+  <p style="margin:0 0 16px">
+    Hi {{ appointment.customer_name }}, thank you for your booking request.
+    {{ calendar.name }} will accept or decline it shortly and we will email you
+    straight away.
+  </p>
+
+  {% include "emails/_details.html" %}
+
+  <p style="margin:20px 0 0;font-size:14px">
+    <a href="{{ appointment_url }}" style="color:#8a663f">View your booking</a>
+    &nbsp;&middot;&nbsp;
+    <a href="{{ cancel_url }}" style="color:#b91c1c">Cancel it</a>
+  </p>
+{% endblock %}

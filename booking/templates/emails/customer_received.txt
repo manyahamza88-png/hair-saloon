@@ -1,0 +1,19 @@
+{% autoescape off %}Hi {{ appointment.customer_name }},
+
+Thank you for your booking request at {{ salon.name }}. We have passed it to
+{{ calendar.name }}, who will accept or decline it shortly. You will get another
+email as soon as that happens.
+
+  When:    {{ start|date:"l j F Y, H:i" }} - {{ end|date:"H:i" }}
+  With:    {{ calendar.name }}
+  Service: {{ appointment.service_name }} ({{ appointment.duration_minutes }} min)
+  Status:  awaiting confirmation
+{% if salon.address %}  Where:   {{ salon.address }}
+{% endif %}
+View or cancel your booking:
+{{ appointment_url }}
+
+--
+{{ salon.name }}{% if salon.phone %} - {{ salon.phone }}{% endif %}
+{{ site_url }}
+{% endautoescape %}

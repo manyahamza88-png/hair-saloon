@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Booking received - {{ salon.name }}{% endblock %}
+
+{% block content %}
+<div class="panel center-card">
+  <div class="big-icon">{% if appointment.status == 'confirmed' %}&#10003;{% else %}&#9993;{% endif %}</div>
+  <h1>
+    {% if appointment.status == 'confirmed' %}
+      Your appointment is confirmed
+    {% else %}
+      Thank you, {{ appointment.customer_name }}
+    {% endif %}
+  </h1>
+
+  {% if appointment.status == 'pending' %}
+    <p class="lede">
+      We have sent your request to <strong>{{ appointment.calendar.name }}</strong>.
+      You will get an email as soon as it is accepted &mdash; usually within a few hours.
+    </p>
+  {% else %}
+    <p class="lede">We have added it to {{ appointment.calendar.name }}'s calendar and emailed you the details.</p>
+  {% endif %}
+
+  <div class="summary-line"><span>When</span><span>{{ appointment.local_start|date:"l j F Y, H:i" }} &ndash; {{ appointment.local_end|date:"H:i" }}</span></div>
+  <div class="summary-line"><span>With</span><span>{{ appointment.calendar.name }}</span></div>
+  <div class="summary-line"><span>Service</span><span>{{ appointment.service_name }}</span></div>
+  <div class="summary-line"><span>Status</span><span class="badge badge-{{ appointment.status }}">{{ appointment.get_status_display }}</span></div>
+  {% if salon.address %}<div class="summary-line"><span>Where</span><span>{{ salon.address }}</span></div>{% endif %}
+
+  <div class="actions">
+    <a class="btn btn-ghost" href="{{ appointment.get_absolute_url }}">View my booking</a>
+    <a class="btn btn-ghost" href="{{ cancel_url }}">Cancel</a>
+    <a class="btn" href="{% url 'booking:home' %}">Back to the salon</a>
+  </div>
+
+  <p class="help" style="margin-top:1rem">Keep this page bookmarked, or use the link in your confirmation email.</p>
+</div>
+{% endblock %}

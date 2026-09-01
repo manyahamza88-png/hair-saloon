@@ -1,0 +1,33 @@
+{% autoescape off %}{% if needs_approval %}New booking request for {{ calendar.name }}{% else %}New booking for {{ calendar.name }}{% endif %}
+
+  When:     {{ start|date:"l j F Y, H:i" }} - {{ end|date:"H:i" }}
+  Service:  {{ appointment.service_name }} ({{ appointment.duration_minutes }} min)
+  Customer: {{ appointment.customer_name }}
+  Email:    {{ appointment.customer_email }}
+{% if appointment.customer_phone %}  Phone:    {{ appointment.customer_phone }}
+{% endif %}{% if appointment.notes %}
+  Notes:    {{ appointment.notes }}
+{% endif %}
+{% if needs_approval %}
+ACCEPT this booking:
+{{ accept_url }}
+
+DECLINE this booking:
+{{ decline_url }}
+
+Both links open a confirmation page, so nothing changes by accident.
+They stay valid for {{ link_valid_days }} days.
+
+The slot is held in your Google Calendar as "tentative" until you decide.
+{% else %}
+It is already confirmed and on your Google Calendar.
+
+Need to cancel it?
+{{ cancel_url }}
+{% endif %}
+Booking details: {{ appointment_url }}
+
+--
+{{ salon.name }}{% if salon.phone %} - {{ salon.phone }}{% endif %}
+{{ site_url }}
+{% endautoescape %}

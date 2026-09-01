@@ -1,0 +1,59 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ salon.name }}{% endblock %}</title>
+  <meta name="description" content="{{ salon.tagline }}">
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="{% url 'booking:home' %}">
+        <span class="brand-mark">&#9986;</span>
+        <span>
+          <strong>{{ salon.name }}</strong>
+          {% if salon.tagline %}<small>{{ salon.tagline }}</small>{% endif %}
+        </span>
+      </a>
+      <nav class="site-nav">
+        <a href="{% url 'booking:home' %}">Book</a>
+        {% if salon.phone %}<a href="tel:{{ salon.phone }}">{{ salon.phone }}</a>{% endif %}
+        {% if user.is_staff %}
+          <a href="{% url 'booking:dashboard' %}">Dashboard</a>
+          <a href="/admin/">Admin</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
+
+  {% if messages %}
+    <div class="wrap">
+      {% for message in messages %}
+        <div class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <main class="wrap">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <div>
+        <strong>{{ salon.name }}</strong>
+        {% if salon.address %}<div>{{ salon.address }}</div>{% endif %}
+        {% if salon.phone %}<div>{{ salon.phone }}</div>{% endif %}
+        {% if salon.contact_email %}<div><a href="mailto:{{ salon.contact_email }}">{{ salon.contact_email }}</a></div>{% endif %}
+      </div>
+      <div class="footer-meta">
+        <a href="{% url 'booking:home' %}">Make a booking</a>
+        {% if not user.is_staff %}<a href="/admin/">Staff login</a>{% endif %}
+      </div>
+    </div>
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

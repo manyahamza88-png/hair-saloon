@@ -1,0 +1,22 @@
+{% autoescape off %}Hi {{ appointment.customer_name }},
+
+Your appointment at {{ salon.name }} is confirmed. We look forward to seeing you.
+
+  When:    {{ start|date:"l j F Y, H:i" }} - {{ end|date:"H:i" }}
+  With:    {{ calendar.name }}
+  Service: {{ appointment.service_name }} ({{ appointment.duration_minutes }} min)
+{% if salon.address %}  Where:   {{ salon.address }}
+{% endif %}{% if appointment.decision_note %}
+A message from {{ calendar.name }}:
+  {{ appointment.decision_note }}
+{% endif %}
+Need to change or cancel? Use this link:
+{{ cancel_url }}
+
+Your booking details:
+{{ appointment_url }}
+
+--
+{{ salon.name }}{% if salon.phone %} - {{ salon.phone }}{% endif %}
+{{ site_url }}
+{% endautoescape %}

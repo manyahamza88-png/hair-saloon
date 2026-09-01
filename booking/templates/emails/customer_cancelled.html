@@ -1,0 +1,22 @@
+{% extends "emails/_base_email.html" %}
+
+{% block heading %}Your appointment was cancelled{% endblock %}
+
+{% block body %}
+  <p style="margin:0 0 16px">
+    Hi {{ appointment.customer_name }}, your appointment with {{ calendar.name }} on
+    <strong>{{ start|date:"l j F Y" }} at {{ start|date:"H:i" }}</strong> has been cancelled.
+  </p>
+
+  {% if appointment.decision_note %}
+    <div style="margin:0 0 18px;padding:12px 14px;background:#f6f2ed;border-radius:10px;font-size:14px">
+      {{ appointment.decision_note|linebreaksbr }}
+    </div>
+  {% endif %}
+
+  <a href="{{ site_url }}"
+     style="display:inline-block;background:#b0855b;color:#ffffff;text-decoration:none;
+            padding:12px 26px;border-radius:999px;font-weight:600;font-size:15px">
+    Book a new time
+  </a>
+{% endblock %}
