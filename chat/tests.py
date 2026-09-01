@@ -205,13 +205,24 @@ class AvailabilityTests(ChatTestCase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(Conversation.objects.exists())
 
-    def test_a_live_chat_survives_closing_time(self):
-        """Closing time must not cut somebody off mid-sentence."""
-        self.start_chat()
+    def open_chat(self):
+        """Start and accept a chat as if the salon were open.
+
+        The salon is forced open explicitly: without this the test would only
+        pass while the real clock happened to sit inside business hours, and
+        fail every evening.
+        """
+        with mock.patch("chat.availability._is_open_at", return_value=True):
+            self.start_chat()
         conversation = Conversation.objects.get()
         staff_client = self.client_class()
         staff_client.force_login(self.staff)
         staff_client.post(reverse("chat:accept", args=[conversation.pk]))
+        return conversation, staff_client
+
+    def test_a_live_chat_survives_closing_time(self):
+        """Closing time must not cut somebody off mid-sentence."""
+        self.open_chat()
 
         with mock.patch("chat.availability._is_open_at", return_value=False), \
              mock.patch("chat.availability.next_opening", return_value=None):
@@ -223,11 +234,7 @@ class AvailabilityTests(ChatTestCase):
 
     def test_the_master_switch_does_end_live_chats(self):
         """Unlike closing time, the switch closes everything immediately."""
-        self.start_chat()
-        conversation = Conversation.objects.get()
-        staff_client = self.client_class()
-        staff_client.force_login(self.staff)
-        staff_client.post(reverse("chat:accept", args=[conversation.pk]))
+        conversation, staff_client = self.open_chat()
         staff_client.post(reverse("chat:toggle"))
 
         conversation.refresh_from_db()
