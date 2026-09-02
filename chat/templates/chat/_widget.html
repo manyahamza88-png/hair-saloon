@@ -12,6 +12,8 @@ is why this block is used instead.
 <noscript><style>#chat-widget{display:none !important}</style></noscript>
 <div id="chat-widget" class="chat-widget"{% if not chat_visible %} hidden{% endif %}
      data-widget-url="{% url 'chat:widget' %}"
+     data-bot-menu-url="{% url 'chat:bot_menu' %}"
+     data-bot-calendars-url="{% url 'chat:bot_calendars' 0 %}"
      data-start-url="{% url 'chat:start' %}"
      data-send-url="{% url 'chat:send' %}"
      data-dismiss-url="{% url 'chat:dismiss' %}">
@@ -46,8 +48,14 @@ is why this block is used instead.
           <label for="chat-name">Your name</label>
           <input type="text" id="chat-name" name="name" class="field-input" maxlength="80" placeholder="e.g. Ana">
         </div>
-        <button class="btn" type="submit" style="width:100%">Start chat</button>
+        <button class="btn" type="submit" style="width:100%">Continue</button>
       </form>
+    </div>
+
+    <!-- bot menu: browse services before ever requesting a live chat ------ -->
+    <div class="chat-state" id="chat-state-bot_menu" hidden>
+      <p id="bot-greeting" class="chat-note"></p>
+      <div id="bot-menu-body"></div>
     </div>
 
     <!-- waiting ---------------------------------------------------------- -->

@@ -279,6 +279,9 @@ details.adder > summary { cursor: pointer; font-weight: 600; padding: .5rem 0; }
 @keyframes chat-bounce { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-5px); } }
 @media (prefers-reduced-motion: reduce) { .chat-dots span { animation: none; opacity: .6; } }
 
+.bot-btn-list { display: flex; flex-wrap: wrap; gap: .5rem; margin: .7rem 0; }
+.bot-btn { text-align: left; }
+
 .chat-error {
   margin: 0 1rem 1rem; padding: .5rem .7rem; border-radius: 8px;
   background: #fdefef; color: #7f1d1d; font-size: .84rem;

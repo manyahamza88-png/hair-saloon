@@ -7,6 +7,8 @@ app_name = "chat"
 urlpatterns = [
     # Customer widget
     path("widget/", views.widget, name="widget"),
+    path("bot/menu/", views.bot_menu, name="bot_menu"),
+    path("bot/services/<int:service_id>/calendars/", views.bot_calendars, name="bot_calendars"),
     path("start/", views.start, name="start"),
     path("send/", views.send, name="send"),
     path("dismiss/", views.dismiss, name="dismiss"),

@@ -13,10 +13,19 @@
 
   var urls = {
     widget: widget.dataset.widgetUrl,
+    botMenu: widget.dataset.botMenuUrl,
+    botCalendars: widget.dataset.botCalendarsUrl,
     start: widget.dataset.startUrl,
     send: widget.dataset.sendUrl,
     dismiss: widget.dataset.dismissUrl
   };
+
+  // Templated URLs look like ".../bot/services/0/calendars/" -- the
+  // placeholder "0" is a path segment in the middle, so match "/0/", not
+  // end-anchored.
+  function urlFor(template, id) {
+    return template.replace("/0/", "/" + id + "/");
+  }
 
   var fab = document.getElementById("chat-fab");
   var panel = document.getElementById("chat-panel");
@@ -33,6 +42,11 @@
   var pollSeconds = 5;
   var quietPolls = 0;
   var unread = 0;
+
+  // Bot menu: browsing services/calendars before any live request exists.
+  // Purely client-side -- nothing is persisted until "Request live chat".
+  var botMode = null; // null | "menu" | "calendars"
+  var customerName = "";
 
   function csrf() {
     var field = widget.querySelector("[name=csrfmiddlewaretoken]");
@@ -137,6 +151,126 @@
     if (nameField) nameField.hidden = data.require_name === false;
   }
 
+  // ---- bot menu: services -> calendars, all before any live request ------
+  function showBotMenuPane() {
+    ["offline", "no_session", "rejected", "accepted"].forEach(function (name) {
+      var el = document.getElementById("chat-state-" + name);
+      if (el) el.hidden = true;
+    });
+    document.getElementById("chat-state-bot_menu").hidden = false;
+    statusLine.textContent = "How can we help?";
+  }
+
+  function exitBotMenu() {
+    botMode = null;
+    document.getElementById("chat-state-bot_menu").hidden = true;
+  }
+
+  function renderBotTop(data) {
+    botMode = "menu";
+    document.getElementById("bot-greeting").textContent = data.greeting;
+
+    var body = document.getElementById("bot-menu-body");
+    body.innerHTML = "";
+
+    if (data.services && data.services.length) {
+      var note = document.createElement("p");
+      note.className = "chat-note";
+      note.textContent = "What can we do for you today?";
+      body.appendChild(note);
+
+      var list = document.createElement("div");
+      list.className = "bot-btn-list";
+      data.services.forEach(function (service) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn btn-sm btn-ghost bot-btn";
+        btn.textContent = service.name + " (" + service.duration_minutes + " min)";
+        btn.addEventListener("click", function () { loadServiceCalendars(service); });
+        list.appendChild(btn);
+      });
+      body.appendChild(list);
+    }
+
+    var liveBtn = document.createElement("button");
+    liveBtn.type = "button";
+    liveBtn.className = "btn btn-sm";
+    liveBtn.style.width = "100%";
+    liveBtn.textContent = "Request live chat";
+    liveBtn.addEventListener("click", requestLiveChat);
+    body.appendChild(liveBtn);
+  }
+
+  function renderBotCalendars(service, calendars) {
+    botMode = "calendars";
+    var body = document.getElementById("bot-menu-body");
+    body.innerHTML = "";
+
+    var back = document.createElement("button");
+    back.type = "button";
+    back.className = "btn btn-sm btn-ghost";
+    back.textContent = "← Back";
+    back.addEventListener("click", function () { enterBotMenu(); });
+    body.appendChild(back);
+
+    var note = document.createElement("p");
+    note.className = "chat-note";
+    note.textContent = calendars.length
+      ? "Who would you like to see for " + service.name + "?"
+      : "Nobody currently offers " + service.name + " online — try live chat instead.";
+    body.appendChild(note);
+
+    var list = document.createElement("div");
+    list.className = "bot-btn-list";
+    calendars.forEach(function (calendar) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-sm bot-btn";
+      btn.textContent = calendar.name;
+      btn.addEventListener("click", function () { window.location.href = calendar.url; });
+      list.appendChild(btn);
+    });
+    body.appendChild(list);
+  }
+
+  function loadServiceCalendars(service) {
+    fetch(urlFor(urls.botCalendars, service.id), {
+      credentials: "same-origin",
+      headers: { "X-Requested-With": "XMLHttpRequest" }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) { renderBotCalendars(service, data.calendars || []); })
+      .catch(function () { showError("Could not load that right now."); });
+  }
+
+  function enterBotMenu() {
+    fetch(urls.botMenu + "?name=" + encodeURIComponent(customerName), {
+      credentials: "same-origin",
+      headers: { "X-Requested-With": "XMLHttpRequest" }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        showBotMenuPane();
+        renderBotTop(data);
+      })
+      .catch(function () { showError("Could not load the menu. Please try again."); });
+  }
+
+  function requestLiveChat() {
+    exitBotMenu();
+    post(urls.start, { name: customerName, page: window.location.pathname })
+      .then(function () {
+        setState("pending");
+        quietPolls = 0;
+        stop();
+        poll();
+      })
+      .catch(function (error) {
+        showError(error.message);
+        enterBotMenu();
+      });
+  }
+
   function poll() {
     var url = urls.widget;
     if ((state === "accepted" || state === "pending") && lastMessageId) {
@@ -156,6 +290,19 @@
         }
         widget.hidden = false;
         applyWording(data);
+
+        if (botMode) {
+          if (data.state === "pending" || data.state === "accepted") {
+            // A live request now exists (just requested, or started in
+            // another tab) -- stop overriding the server-reported pane.
+            botMode = null;
+          } else {
+            // Still browsing the menu: don't let the plain "no_session" pane
+            // the server reports (nobody has asked for live chat yet) clobber it.
+            schedule();
+            return;
+          }
+        }
 
         var previous = state;
         conversationId = data.conversation_id || null;
@@ -233,22 +380,15 @@
 
   document.getElementById("chat-start-form").addEventListener("submit", function (event) {
     event.preventDefault();
-    var button = event.target.querySelector("button[type=submit]");
-    button.disabled = true;
-    post(urls.start, {
-      name: document.getElementById("chat-name").value.trim(),
-      // No opening question here any more: the salon greets first, and the
-      // visitor answers in the normal composer.
-      page: window.location.pathname
-    })
-      .then(function () {
-        setState("pending");
-        quietPolls = 0;
-        stop();
-        poll();
-      })
-      .catch(function (error) { showError(error.message); })
-      .then(function () { button.disabled = false; });
+    var name = document.getElementById("chat-name").value.trim();
+    var nameField = document.getElementById("chat-name-field");
+    if (!nameField.hidden && !name) {
+      showError("Please tell us your name first.");
+      return;
+    }
+    customerName = name;
+    showError("");
+    enterBotMenu();
   });
 
   var sendForm = document.getElementById("chat-send-form");

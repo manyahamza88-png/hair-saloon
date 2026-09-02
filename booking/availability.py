@@ -327,6 +327,19 @@ def days_with_availability(
     return counts
 
 
+def calendars_offering(service) -> list[Calendar]:
+    """Active calendars whose ``bookable_services()`` include this service.
+
+    Shared by the homepage's service-first flow and the chat widget's booking
+    menu, so "who offers this?" is answered the same way everywhere.
+    """
+    return [
+        calendar
+        for calendar in Calendar.objects.filter(is_active=True).order_by("sort_order", "name")
+        if calendar.bookable_services().filter(pk=service.pk).exists()
+    ]
+
+
 def next_available_slot(
     calendar: Calendar, duration_minutes: int | None = None, search_days: int = 30
 ) -> Slot | None:

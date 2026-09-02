@@ -6,6 +6,7 @@ app_name = "booking"
 
 urlpatterns = [
     path("", views.home, name="home"),
+    path("service/<int:service_id>/", views.service_calendars, name="service_calendars"),
     path("book/<slug:slug>/", views.calendar_detail, name="calendar_detail"),
     path("book/<slug:slug>/submit/", views.book, name="book"),
     path("api/<slug:slug>/slots/", views.slots_api, name="slots_api"),

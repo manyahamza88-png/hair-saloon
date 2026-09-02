@@ -41,32 +41,57 @@ logger = logging.getLogger(__name__)
 # Public pages
 # ---------------------------------------------------------------------------
 def home(request):
-    """Homepage: every configured calendar as a clickable card."""
+    """Homepage: pick a service first, then who offers it.
+
+    A salon that has not set up any services yet falls back to the previous
+    behaviour -- every calendar as a clickable card -- so booking never breaks
+    just because nobody has visited the admin's Services page.
+    """
     salon = SalonSettings.load()
-    calendars = list(Calendar.objects.filter(is_active=True).prefetch_related("services"))
+    services = list(Service.objects.filter(is_active=True))
 
     cards = []
-    for calendar in calendars:
-        slot = availability.next_available_slot(calendar)
-        cards.append(
-            {
-                "calendar": calendar,
-                "next_slot": slot,
-                "services": calendar.bookable_services()[:4],
-                "duration": calendar.duration_minutes(salon),
-            }
-        )
+    if not services:
+        for calendar in Calendar.objects.filter(is_active=True).prefetch_related("services"):
+            cards.append(
+                {
+                    "calendar": calendar,
+                    "next_slot": availability.next_available_slot(calendar),
+                    "services": calendar.bookable_services()[:4],
+                    "duration": calendar.duration_minutes(salon),
+                }
+            )
 
     return render(
         request,
         "booking/home.html",
         {
             "salon": salon,
+            "services": services,
             "cards": cards,
             "schedule": availability.weekly_schedule(),
-            "services": Service.objects.filter(is_active=True)[:12],
             "time_off": availability.upcoming_time_off(limit=3),
         },
+    )
+
+
+def service_calendars(request, service_id):
+    """Step 2 of the service-first flow: who offers the chosen service."""
+    salon = SalonSettings.load()
+    service = get_object_or_404(Service, pk=service_id, is_active=True)
+
+    cards = [
+        {
+            "calendar": calendar,
+            "next_slot": availability.next_available_slot(calendar, service.duration_minutes),
+        }
+        for calendar in availability.calendars_offering(service)
+    ]
+
+    return render(
+        request,
+        "booking/service_calendars.html",
+        {"salon": salon, "service": service, "cards": cards},
     )
 
 

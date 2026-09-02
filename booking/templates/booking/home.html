@@ -12,7 +12,27 @@
   </p>
 </section>
 
-{% if cards %}
+{% if services %}
+  <h2 style="margin-top:0">Choose a service</h2>
+  <div class="card-grid">
+    {% for service in services %}
+      <article class="cal-card">
+        <div class="body">
+          <h3>{{ service.name }}</h3>
+          {% if service.description %}
+            <p class="small muted">{{ service.description }}</p>
+          {% endif %}
+        </div>
+        <div class="foot">
+          <span class="small muted">
+            {{ service.duration_minutes }} min{% if service.price %} &middot; {{ service.price }}{% endif %}
+          </span>
+          <a class="btn btn-sm" href="{% url 'booking:service_calendars' service.pk %}">Choose</a>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+{% elif cards %}
   <div class="card-grid">
     {% for card in cards %}
       <article class="cal-card" style="border-top-color: {{ card.calendar.colour }}">
@@ -34,12 +54,6 @@
               No free slots in the next few weeks
             {% endif %}
           </p>
-
-          {% if card.services %}
-            <div class="tag-row">
-              {% for service in card.services %}<span class="tag">{{ service.name }}</span>{% endfor %}
-            </div>
-          {% endif %}
         </div>
         <div class="foot">
           <span class="small muted">{{ card.duration }} min appointments</span>
@@ -59,58 +73,34 @@
   </div>
 {% endif %}
 
-<div class="two-col" style="margin-top:2.4rem">
-  <div class="panel">
-    <h2 style="margin-top:0">Services</h2>
-    {% if services %}
-      <table class="hours-table">
-        {% for service in services %}
-          <tr>
-            <td>
-              {{ service.name }}
-              {% if service.description %}<div class="small muted">{{ service.description }}</div>{% endif %}
-            </td>
-            <td>
-              {{ service.duration_minutes }} min
-              {% if service.price %}<div class="small">{{ service.price }}</div>{% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-      </table>
-    {% else %}
-      <p class="muted small">Standard appointments of {{ salon.default_duration_minutes }} minutes.</p>
-    {% endif %}
-  </div>
+<div class="panel" style="margin-top:2.4rem">
+  <h2 style="margin-top:0">Opening hours</h2>
+  <table class="hours-table">
+    {% for row in schedule %}
+      <tr class="{% if row.is_today %}today{% endif %}">
+        <td>{{ row.label }}</td>
+        <td>
+          {% if row.closed %}Closed
+          {% else %}
+            {{ row.hours.opens_at|time:"H:i" }}&ndash;{{ row.hours.closes_at|time:"H:i" }}
+            {% if row.hours.break_start %}<div class="small">break {{ row.hours.break_start|time:"H:i" }}&ndash;{{ row.hours.break_end|time:"H:i" }}</div>{% endif %}
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
 
-  <div class="panel">
-    <h2 style="margin-top:0">Opening hours</h2>
-    <table class="hours-table">
-      {% for row in schedule %}
-        <tr class="{% if row.is_today %}today{% endif %}">
-          <td>{{ row.label }}</td>
-          <td>
-            {% if row.closed %}Closed
-            {% else %}
-              {{ row.hours.opens_at|time:"H:i" }}&ndash;{{ row.hours.closes_at|time:"H:i" }}
-              {% if row.hours.break_start %}<div class="small">break {{ row.hours.break_start|time:"H:i" }}&ndash;{{ row.hours.break_end|time:"H:i" }}</div>{% endif %}
-            {% endif %}
-          </td>
-        </tr>
+  {% if time_off %}
+    <h3 style="margin-top:1.2rem">Closed for</h3>
+    <ul class="small muted" style="padding-left:1.1rem;margin:0">
+      {% for entry in time_off %}
+        <li>
+          {{ entry.start_date|date:"j M" }}{% if entry.end_date != entry.start_date %}&ndash;{{ entry.end_date|date:"j M" }}{% endif %}
+          {% if entry.reason %} &middot; {{ entry.reason }}{% endif %}
+          {% if entry.calendar %} <em>({{ entry.calendar.name }})</em>{% endif %}
+        </li>
       {% endfor %}
-    </table>
-
-    {% if time_off %}
-      <h3 style="margin-top:1.2rem">Closed for</h3>
-      <ul class="small muted" style="padding-left:1.1rem;margin:0">
-        {% for entry in time_off %}
-          <li>
-            {{ entry.start_date|date:"j M" }}{% if entry.end_date != entry.start_date %}&ndash;{{ entry.end_date|date:"j M" }}{% endif %}
-            {% if entry.reason %} &middot; {{ entry.reason }}{% endif %}
-            {% if entry.calendar %} <em>({{ entry.calendar.name }})</em>{% endif %}
-          </li>
-        {% endfor %}
-      </ul>
-    {% endif %}
-  </div>
+    </ul>
+  {% endif %}
 </div>
 {% endblock %}

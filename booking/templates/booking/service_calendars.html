@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}{{ service.name }} - {{ salon.name }}{% endblock %}
+
+{% block content %}
+<p class="small"><a href="{% url 'booking:home' %}">&larr; All services</a></p>
+
+<section class="hero">
+  <h1>{{ service.name }}</h1>
+  <p class="lede">
+    {% if service.description %}{{ service.description }}{% endif %}
+  </p>
+  <p class="small muted">
+    {{ service.duration_minutes }} min appointments{% if service.price %} &middot; {{ service.price }}{% endif %}
+    &mdash; choose who you would like to see below.
+  </p>
+</section>
+
+{% if cards %}
+  <div class="card-grid">
+    {% for card in cards %}
+      <article class="cal-card" style="border-top-color: {{ card.calendar.colour }}">
+        {% if card.calendar.photo %}
+          <img class="photo" src="{{ card.calendar.photo.url }}" alt="{{ card.calendar.name }}">
+        {% endif %}
+        <div class="body">
+          <h3>{{ card.calendar.name }}</h3>
+          {% if card.calendar.description %}
+            <p class="small muted">{{ card.calendar.description }}</p>
+          {% endif %}
+          <p class="next">
+            {% if card.next_slot %}
+              Next free: <strong>{{ card.next_slot.start|date:"D j M, H:i" }}</strong>
+            {% elif not card.calendar.accepts_online_booking %}
+              Online booking paused
+            {% else %}
+              No free slots in the next few weeks
+            {% endif %}
+          </p>
+        </div>
+        <div class="foot">
+          <span class="small muted">{{ service.duration_minutes }} min appointments</span>
+          {% if card.calendar.accepts_online_booking %}
+            <a class="btn btn-sm" href="{% url 'booking:calendar_detail' card.calendar.slug %}?service={{ service.pk }}">Choose</a>
+          {% else %}
+            <span class="btn btn-sm" disabled>Unavailable</span>
+          {% endif %}
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="empty-state">
+    <p><strong>Nobody currently offers this service online.</strong></p>
+    <p class="small">
+      A member of staff can assign a calendar to it under
+      <a href="/admin/booking/service/{{ service.pk }}/change/">this service in the admin</a>.
+    </p>
+  </div>
+{% endif %}
+{% endblock %}

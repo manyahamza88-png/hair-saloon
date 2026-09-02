@@ -277,6 +277,58 @@ class BookingFlowTests(BaseSalonTest):
         response = self.client.get(reverse("booking:home"))
         self.assertNotContains(response, "Maria")
 
+    def test_homepage_leads_with_services_once_any_exist(self):
+        """Service-first flow: once services are configured, the homepage
+        offers them (not calendars) as the thing to click first."""
+        cut = Service.objects.create(name="Cut & finish", duration_minutes=45)
+        response = self.client.get(reverse("booking:home"))
+        self.assertContains(response, "Cut &amp; finish")
+        self.assertContains(response, reverse("booking:service_calendars", args=[cut.pk]))
+        # The old "go straight to a calendar" link should not be offered
+        # alongside it -- one flow, not two competing ones.
+        self.assertNotContains(response, reverse("booking:calendar_detail", args=[self.calendar.slug]))
+
+    def test_service_calendars_lists_only_calendars_offering_it(self):
+        other = Calendar.objects.create(
+            name="Ben", google_calendar_id="ben@example.com", owner_email="ben@example.com"
+        )
+        cut = Service.objects.create(name="Cut & finish", duration_minutes=45)
+        cut.calendars.set([self.calendar])  # curated: only Maria offers this one
+
+        response = self.client.get(reverse("booking:service_calendars", args=[cut.pk]))
+        self.assertContains(response, "Maria")
+        self.assertNotContains(response, "Ben")
+        # And the duration shown/linked matches the service, not the calendar default.
+        self.assertContains(response, "45 min")
+        self.assertContains(response, f"?service={cut.pk}")
+        other.delete()
+
+    def test_service_calendars_falls_back_to_universal_services(self):
+        """A service with no calendars picked is offered on every calendar
+        that has no curated service list of its own."""
+        curated_only = Calendar.objects.create(
+            name="Ben", google_calendar_id="ben@example.com", owner_email="ben@example.com"
+        )
+        bens_special = Service.objects.create(name="Ben's special", duration_minutes=30)
+        bens_special.calendars.set([curated_only])
+        universal = Service.objects.create(name="Wash & blow dry", duration_minutes=20)
+
+        response = self.client.get(reverse("booking:service_calendars", args=[universal.pk]))
+        # Maria has no curated list, so the universal service reaches her...
+        self.assertContains(response, "Maria")
+        # ...but Ben's curated list doesn't include it, so he is excluded.
+        self.assertNotContains(response, "Ben")
+
+    def test_choosing_a_calendar_for_a_service_preselects_its_duration(self):
+        cut = Service.objects.create(name="Colour", duration_minutes=120)
+        monday = next_weekday(0)
+        response = self.client.get(
+            reverse("booking:calendar_detail", args=[self.calendar.slug]),
+            {"date": monday.isoformat(), "service": cut.pk},
+        )
+        self.assertEqual(response.context["duration"], 120)
+        self.assertEqual(response.context["selected_service"], cut)
+
     def test_booking_page_shows_slots(self):
         monday = next_weekday(0)
         response = self.client.get(

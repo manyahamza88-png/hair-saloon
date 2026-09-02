@@ -143,6 +143,60 @@ def widget(request):
     )
 
 
+def bot_menu(request):
+    """First step of the in-chat booking helper: a greeting plus the services
+    on offer, so a visitor can find a slot without ever waiting for a member
+    of staff. No ``Conversation`` exists yet at this point -- that only
+    happens if they go on to request live chat."""
+    chat_settings = ChatSettings.load()
+    if not chat_settings.is_available():
+        return JsonResponse(
+            {"error": chat_settings.unavailable_message() or "Live chat is switched off."},
+            status=403,
+        )
+
+    from booking.models import Service
+
+    name = request.GET.get("name", "").strip()[:80]
+    services = [
+        {
+            "id": service.pk,
+            "name": service.name,
+            "duration_minutes": service.duration_minutes,
+            "price": str(service.price) if service.price is not None else "",
+        }
+        for service in Service.objects.filter(is_active=True)
+    ]
+    return JsonResponse({"greeting": chat_settings.render_auto_greeting(name), "services": services})
+
+
+def bot_calendars(request, service_id):
+    """Second step: which calendars offer the service the visitor picked."""
+    from booking import availability as booking_availability
+    from booking.models import Service
+
+    service = get_object_or_404(Service, pk=service_id, is_active=True)
+    calendars = [
+        {
+            "id": calendar.pk,
+            "name": calendar.name,
+            "url": f"{calendar.get_absolute_url()}?service={service.pk}",
+        }
+        for calendar in booking_availability.calendars_offering(service)
+        if calendar.accepts_online_booking
+    ]
+    return JsonResponse(
+        {
+            "service": {
+                "id": service.pk,
+                "name": service.name,
+                "duration_minutes": service.duration_minutes,
+            },
+            "calendars": calendars,
+        }
+    )
+
+
 @require_POST
 def start(request):
     """Customer asks to chat: creates a pending conversation."""

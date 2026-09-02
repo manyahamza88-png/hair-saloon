@@ -15,7 +15,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from booking.models import BusinessHours, SalonSettings, TimeOff
+from booking.models import BusinessHours, Calendar, SalonSettings, Service, TimeOff
 from chat.models import ChatSettings, Conversation, Message
 
 
@@ -94,6 +94,60 @@ class WidgetStateTests(ChatTestCase):
         self.settings_row.save()
         self.assertEqual(self.start_chat().status_code, 403)
         self.assertFalse(Conversation.objects.exists())
+
+
+class BotMenuTests(ChatTestCase):
+    """The in-widget booking helper: browse services/calendars before ever
+    requesting live chat. Nothing here should touch Conversation at all."""
+
+    def setUp(self):
+        super().setUp()
+        self.calendar = Calendar.objects.create(
+            name="Maria", google_calendar_id="maria@example.com", owner_email="maria@example.com"
+        )
+
+    def test_menu_greets_by_name_and_lists_active_services(self):
+        Service.objects.create(name="Cut & finish", duration_minutes=45)
+        Service.objects.create(name="Retired service", duration_minutes=30, is_active=False)
+
+        payload = self.client.get(reverse("chat:bot_menu"), {"name": "Ana"}).json()
+        self.assertEqual(payload["greeting"], "Hi Ana, how may I help you?")
+        names = [s["name"] for s in payload["services"]]
+        self.assertIn("Cut & finish", names)
+        self.assertNotIn("Retired service", names)
+        self.assertFalse(Conversation.objects.exists())
+
+    def test_menu_is_refused_when_chat_is_switched_off(self):
+        self.settings_row.enabled = False
+        self.settings_row.save()
+        response = self.client.get(reverse("chat:bot_menu"), {"name": "Ana"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_calendars_endpoint_lists_only_calendars_offering_the_service(self):
+        other = Calendar.objects.create(
+            name="Ben", google_calendar_id="ben@example.com", owner_email="ben@example.com"
+        )
+        cut = Service.objects.create(name="Cut & finish", duration_minutes=45)
+        cut.calendars.set([self.calendar])
+
+        payload = self.client.get(reverse("chat:bot_calendars", args=[cut.pk])).json()
+        self.assertEqual(payload["service"]["duration_minutes"], 45)
+        names = [c["name"] for c in payload["calendars"]]
+        self.assertIn("Maria", names)
+        self.assertNotIn("Ben", names)
+        # The link into the real booking page carries the service, so the
+        # slot duration there matches what the admin configured.
+        maria = next(c for c in payload["calendars"] if c["name"] == "Maria")
+        self.assertIn(f"?service={cut.pk}", maria["url"])
+        other.delete()
+
+    def test_calendars_endpoint_excludes_calendars_not_taking_bookings(self):
+        self.calendar.accepts_online_booking = False
+        self.calendar.save()
+        universal = Service.objects.create(name="Wash & blow dry", duration_minutes=20)
+
+        payload = self.client.get(reverse("chat:bot_calendars", args=[universal.pk])).json()
+        self.assertEqual(payload["calendars"], [])
 
 
 class AvailabilityTests(ChatTestCase):
