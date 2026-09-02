@@ -307,6 +307,54 @@ details.adder > summary { cursor: pointer; font-weight: 600; padding: .5rem 0; }
 .chat-dot-waiting { background: var(--warn); box-shadow: 0 0 0 3px rgba(180, 83, 9, .16); }
 .chat-dot-off { background: var(--ink-soft); box-shadow: 0 0 0 3px rgba(107, 114, 128, .14); }
 
+/* ---------- staff chat notifications (site-wide) ---------- */
+.staff-chat-notify {
+  position: fixed; left: 18px; bottom: 18px; z-index: 70;
+  display: flex; flex-direction: column-reverse; gap: .7rem;
+  align-items: flex-start; pointer-events: none;
+}
+.staff-chat-notify > * { pointer-events: auto; }
+
+.chat-toast {
+  width: min(320px, calc(100vw - 32px));
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: 0 16px 44px rgba(34, 28, 23, .2);
+  padding: .9rem 1rem;
+}
+.chat-toast-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
+.chat-toast-head strong { font-size: .96rem; }
+.chat-toast-wait { font-size: .74rem; color: var(--warn); font-weight: 600; white-space: nowrap; }
+.chat-toast-meta { font-size: .78rem; color: var(--ink-soft); margin-top: .15rem; }
+.chat-toast-quote { margin-top: .5rem; font-size: .85rem; font-style: italic; color: var(--ink-soft); }
+.chat-toast-actions { display: flex; gap: .4rem; margin-top: .7rem; flex-wrap: wrap; }
+.chat-toast-actions .btn-min { margin-left: auto; }
+
+.chat-mini {
+  width: min(320px, calc(100vw - 32px));
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); overflow: hidden;
+  box-shadow: 0 16px 44px rgba(34, 28, 23, .2);
+  display: flex; flex-direction: column;
+}
+.chat-mini.is-collapsed .chat-mini-body { display: none; }
+.chat-mini-head {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .7rem .9rem; background: var(--accent); color: #fff; cursor: pointer;
+}
+.chat-mini-head strong { font-size: .92rem; flex: 1; }
+.chat-mini-actions { display: flex; gap: .3rem; }
+.chat-mini-actions button {
+  background: none; border: none; color: #fff; cursor: pointer;
+  font-size: .95rem; line-height: 1; padding: .1rem .25rem;
+}
+.chat-mini-body { display: flex; flex-direction: column; }
+.chat-mini .chat-log { min-height: 200px; max-height: 300px; }
+.chat-mini-unread {
+  background: #fff; color: var(--accent-dark); border-radius: 999px;
+  font-size: .68rem; font-weight: 700; min-width: 18px; height: 18px; line-height: 18px;
+  text-align: center; padding: 0 4px;
+}
+
 /* ---------- in-admin guides ---------- */
 details.guide {
   border: 1px solid var(--line); border-radius: 10px;

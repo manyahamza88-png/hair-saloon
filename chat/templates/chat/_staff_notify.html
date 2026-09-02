@@ -1,0 +1,18 @@
+{% load static %}
+{% comment %}
+Site-wide staff notification: pops up on every staff page (except the chat
+desk itself, which already has this built into its own layout) when a
+customer asks to chat. Accept turns the toast into a small floating chat
+window right there; Decline sends the "too busy" reply; Minimize just hides
+the toast without answering, so the request stays pending for someone else
+to catch on the dashboard or the chat desk.
+{% endcomment %}
+<div id="staff-chat-notify" class="staff-chat-notify"
+     data-live-url="{% url 'chat:live_data' %}"
+     data-accept-url="{% url 'chat:accept' 0 %}"
+     data-reject-url="{% url 'chat:reject' 0 %}"
+     data-close-url="{% url 'chat:close' 0 %}"
+     data-send-url="{% url 'chat:staff_send' 0 %}">
+  {% csrf_token %}
+</div>
+<script src="{% static 'js/staff_chat_notify.js' %}" defer></script>

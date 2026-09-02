@@ -58,6 +58,9 @@
     </div>
   </footer>
   {% include 'chat/_widget.html' %}
+  {% if user.is_staff and request.resolver_match.url_name != 'desk' %}
+    {% include 'chat/_staff_notify.html' %}
+  {% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>
