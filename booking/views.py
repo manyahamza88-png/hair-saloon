@@ -542,9 +542,14 @@ def google_setup(request):
             }
         )
 
-    # A calendar with no account attached writes nothing to Google. That is the
-    # quiet failure worth shouting about on this page.
-    unlinked = list(Calendar.objects.filter(credential__isnull=True, is_active=True))
+    # A calendar with no account attached -- or one with an account but no
+    # actual Google calendar ID picked -- writes nothing to Google. Both are
+    # the same quiet failure worth shouting about on this page.
+    unlinked = list(
+        Calendar.objects.filter(is_active=True).filter(
+            Q(credential__isnull=True) | Q(google_calendar_id="")
+        )
+    )
 
     first = credentials[0] if credentials else None
     return render(

@@ -1221,6 +1221,21 @@ class PerCalendarOAuthTests(BaseSalonTest):
         self.assertEqual(self.calendar.credential, maria)
         self.assertTrue(self.calendar.is_google_connected)
 
+    def test_a_calendar_with_a_credential_but_no_calendar_id_is_still_flagged(self):
+        """A calendar attached to an account (e.g. by hand in the admin) but
+        never actually pointed at a Google calendar is just as broken as one
+        with no account at all -- and must not fall through the "unlinked"
+        check just because ``credential`` happens to be set."""
+        maria = self._connect_as("maria@gmail.com")
+        self.calendar.credential = maria
+        self.calendar.google_calendar_id = ""
+        self.calendar.save(update_fields=["credential", "google_calendar_id"])
+        self.assertFalse(self.calendar.is_google_connected)
+
+        page = self.client.get(reverse("booking:google_setup")).content.decode()
+        self.assertIn("do not reach Google", page)
+        self.assertIn(self.calendar.name, page)
+
     def test_linking_pushes_existing_bookings(self):
         appointment = self.make_appointment()      # made before any Google link
         maria = self._connect_as("maria@gmail.com")
