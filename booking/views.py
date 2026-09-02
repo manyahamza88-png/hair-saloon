@@ -150,7 +150,16 @@ def calendar_detail(request, slug):
             "max_date": horizon,
             "schedule": availability.weekly_schedule(calendar),
             "time_off": availability.upcoming_time_off(calendar, limit=3),
-            "form": BookingForm(calendar=calendar, initial={"service": selected_service}),
+            "form": BookingForm(
+                calendar=calendar,
+                initial={
+                    "service": selected_service,
+                    # Carried over from the chat widget, which already knows
+                    # who it is talking to by the time it opens this page.
+                    "customer_name": request.GET.get("name", "")[:120],
+                    "customer_email": request.GET.get("email", "")[:254],
+                },
+            ),
         },
     )
 

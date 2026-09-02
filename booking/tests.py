@@ -319,6 +319,15 @@ class BookingFlowTests(BaseSalonTest):
         # ...but Ben's curated list doesn't include it, so he is excluded.
         self.assertNotContains(response, "Ben")
 
+    def test_calendar_page_prefills_name_and_email_from_the_chat_widget(self):
+        response = self.client.get(
+            reverse("booking:calendar_detail", args=[self.calendar.slug]),
+            {"name": "Ana", "email": "ana@example.com"},
+        )
+        self.assertEqual(response.context["form"].initial["customer_name"], "Ana")
+        self.assertEqual(response.context["form"].initial["customer_email"], "ana@example.com")
+        self.assertContains(response, "ana@example.com")
+
     def test_choosing_a_calendar_for_a_service_preselects_its_duration(self):
         cut = Service.objects.create(name="Colour", duration_minutes=120)
         monday = next_weekday(0)

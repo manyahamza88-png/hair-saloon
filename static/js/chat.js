@@ -45,8 +45,9 @@
 
   // Bot menu: browsing services/calendars before any live request exists.
   // Purely client-side -- nothing is persisted until "Request live chat".
-  var botMode = null; // null | "menu" | "calendars"
+  var botMode = null; // null | "menu" | "calendars" | "email"
   var customerName = "";
+  var currentService = null;
 
   function csrf() {
     var field = widget.querySelector("[name=csrfmiddlewaretoken]");
@@ -227,13 +228,73 @@
       btn.type = "button";
       btn.className = "btn btn-sm bot-btn";
       btn.textContent = calendar.name;
-      btn.addEventListener("click", function () { window.location.href = calendar.url; });
+      btn.addEventListener("click", function () { renderBotEmailPrompt(calendar); });
       list.appendChild(btn);
     });
     body.appendChild(list);
   }
 
+  // We already know the visitor's name from the start of the chat; ask for
+  // an email too so the reservation form on the next page can be filled in
+  // without making them type both again.
+  function renderBotEmailPrompt(calendar) {
+    botMode = "email";
+    var body = document.getElementById("bot-menu-body");
+    body.innerHTML = "";
+
+    var back = document.createElement("button");
+    back.type = "button";
+    back.className = "btn btn-sm btn-ghost";
+    back.textContent = "← Back";
+    back.addEventListener("click", function () { loadServiceCalendars(currentService); });
+    body.appendChild(back);
+
+    var note = document.createElement("p");
+    note.className = "chat-note";
+    note.textContent = "What's your email? We'll use it to fill in your booking with " + calendar.name + ".";
+    body.appendChild(note);
+
+    var form = document.createElement("form");
+    var field = document.createElement("div");
+    field.className = "field";
+    var label = document.createElement("label");
+    label.setAttribute("for", "bot-email-input");
+    label.textContent = "Your email";
+    var input = document.createElement("input");
+    input.type = "email";
+    input.id = "bot-email-input";
+    input.className = "field-input";
+    input.placeholder = "you@example.com";
+    input.required = true;
+    field.appendChild(label);
+    field.appendChild(input);
+    form.appendChild(field);
+
+    var submit = document.createElement("button");
+    submit.type = "submit";
+    submit.className = "btn btn-sm";
+    submit.style.width = "100%";
+    submit.style.marginTop = ".6rem";
+    submit.textContent = "Continue to booking";
+    form.appendChild(submit);
+
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      var email = input.value.trim();
+      if (!email) return;
+      var separator = calendar.url.indexOf("?") === -1 ? "?" : "&";
+      window.location.href =
+        calendar.url + separator +
+        "name=" + encodeURIComponent(customerName) +
+        "&email=" + encodeURIComponent(email);
+    });
+
+    body.appendChild(form);
+    window.setTimeout(function () { input.focus(); }, 0);
+  }
+
   function loadServiceCalendars(service) {
+    currentService = service;
     fetch(urlFor(urls.botCalendars, service.id), {
       credentials: "same-origin",
       headers: { "X-Requested-With": "XMLHttpRequest" }
